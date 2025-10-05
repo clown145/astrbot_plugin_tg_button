@@ -17,6 +17,8 @@ except ImportError:
     logger.error("Telegram 库未安装，请在 AstrBot 环境中执行: pip install python-telegram-bot")
     InlineKeyboardButton, InlineKeyboardMarkup, Application, CallbackQueryHandler, ExtBot = None, None, None, None, None
 
+PLUGIN_NAME = "astrbot_plugin_tg_button"
+
 def get_plugin_data_path() -> Path:
     """获取插件的标准数据目录"""
     return StarTools.get_data_dir(PLUGIN_NAME)
@@ -224,4 +226,5 @@ class DynamicButtonFrameworkPlugin(Star):
             platform.application.add_handler(CallbackQueryHandler(button_callback_handler), group=1)
             logger.info("成功注册 Telegram 动态按钮回调处理器到 platform.application。")
         else:
+
             logger.error("无法注册回调处理器：platform 对象没有 'application' 属性。")
