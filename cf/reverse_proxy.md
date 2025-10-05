@@ -24,15 +24,11 @@
 3.  点击 **Create Application** (创建应用程序)，然后选择 **Create Worker** (创建 Worker)。
 4.  为您的 Worker 指定一个名称 (例如 `tg-proxy`)，然后点击 **Deploy** (部署)。
 
-![Create Worker](https://i.imgur.com/gYf0rC5.png)
-
 ### 第 2 步：部署反代代码
 
 1.  进入您刚刚创建的 Worker，点击 **Quick Edit** (快速编辑)。
 2.  删除编辑器中所有默认代码，然后将 `worker.js` 文件中的代码完整地复制粘贴进去。
 3.  点击 **Save and Deploy** (保存并部署)。
-
-![Edit Worker](https://i.imgur.com/k2e4t3j.png)
 
 ### 第 3 步：绑定自定义域名 (关键步骤)
 
@@ -41,8 +37,6 @@ Cloudflare 提供的默认 `workers.dev` 域名在国内通常无法访问，因
 1.  在您的 Worker 管理页面，切换到 **Triggers** (触发器) 选项卡。
 2.  在 **Custom Domains** (自定义域) 部分，点击 **Add Custom Domain** (添加自定义域)。
 3.  输入一个您想使用的子域名 (例如 `tg-api.yourdomain.com`)，然后点击 **Add Domain**。Cloudflare 会自动为您处理 DNS 解析记录。
-
-![Add Custom Domain](https://i.imgur.com/nJgq7U0.png)
 
 ### 第 4 步：修改 AstrBot 插件配置
 
@@ -76,5 +70,6 @@ Cloudflare 提供的默认 `workers.dev` 域名在国内通常无法访问，因
 // 将 TG_HOST 的值修改为您需要代理的目标 API 域名
 const TG_HOST = "generativelanguage.googleapis.com";
 ```
+
 
 然后，将您程序中所有对 `generativelanguage.googleapis.com` 的请求，替换为您的 Worker 域名，即可实现代理。
