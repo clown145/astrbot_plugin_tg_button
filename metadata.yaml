@@ -1,5 +1,5 @@
 name: astrbot_plugin_tg_button
 author: 随风潜入夜
 description: 一个可以把指令或者网址绑定到Telegram的按钮上的插件
-version: 1.0.0
+version: 1.0.1
 repo: "https://github.com/clown145/astrbot_plugin_tg_button"
