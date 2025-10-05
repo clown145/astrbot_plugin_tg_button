@@ -27,7 +27,7 @@ def load_buttons_data() -> List[Dict]:
     if not data_file.exists():
         return []
     try:
-        with open(data_file, 'r', encoding='utf-8') as f:
+        with open(data_file, 'r', encoding='utf-8-sig') as f:
             return json.load(f)
     except Exception as e:
         logger.error(f"读取按钮数据失败: {e}")
@@ -48,6 +48,10 @@ try:
 except FileNotFoundError:
     logger.warning("按钮框架插件的配置文件未找到，将使用默认值。")
     plugin_config = {}
+except json.JSONDecodeError as e:
+    logger.error(f"解析配置文件 {PLUGIN_NAME}_config.json 失败: {e}，将使用默认值。")
+    plugin_config = {}
+
 
 MENU_COMMAND = plugin_config.get("menu_command", "menu")
 BIND_PERMISSION_LEVEL = plugin_config.get("bind_permission", "admin")
@@ -66,14 +70,10 @@ class DynamicButtonFrameworkPlugin(Star):
         super().__init__(context)
         self.config = config
         self.CALLBACK_PREFIX_CMD = "final_btn_cmd:"
-        # 移除 asyncio.create_task 和旧的初始化方法调用
         logger.info(f"动态按钮插件已加载，菜单指令为 '/{MENU_COMMAND}'。回调将在 AstrBot 完全启动后注册。")
 
     @filter.on_astrbot_loaded()
     async def _initialize_telegram_callbacks(self):
-        """
-        在 AstrBot 完全加载后安全地注册 Telegram 回调。
-        """
         if not Application:
             logger.error("Dynamic Button Framework 插件因缺少 Telegram 库而无法注册回调。")
             return
@@ -142,7 +142,6 @@ class DynamicButtonFrameworkPlugin(Star):
         else:
             logger.error("无法注册回调处理器：platform 对象没有 'application' 属性。")
     
-
     @filter.command(MENU_COMMAND)
     async def send_menu(self, event: AstrMessageEvent):
         if event.get_platform_name() != "telegram":
@@ -192,14 +191,46 @@ class DynamicButtonFrameworkPlugin(Star):
 
     @filter.command("bind", alias={"绑定"})
     @filter.permission_type(PERMISSION_VALUE) 
-    async def bind_button(self, event: AstrMessageEvent, text: str, btn_type: str, value: str):
-        btn_type_map = {"指令": "command", "网址": "url"}
-        btn_type = btn_type_map.get(btn_type.lower(), btn_type.lower())
+    async def bind_button(self, event: AstrMessageEvent):
+        args_str = event.message_str.strip()
         
-        if btn_type not in ["command", "url"]:
-            yield event.plain_result("绑定失败：类型必须是 'command'/'指令' 或 'url'/'网址'。")
+        arg_parts = args_str.split()
+        if len(arg_parts) < 3:
+            yield event.plain_result(
+                "格式错误或参数不足！\n"
+                "格式: /bind <按钮文字> <类型> <值>\n"
+                "例如: /bind 搜索谷歌 指令 search google"
+            )
             return
-            
+        
+        actual_args = arg_parts[1:]
+        
+        type_keywords_map = {
+            "指令": "command", "command": "command",
+            "网址": "url", "url": "url"
+        }
+        found_keyword = None
+        keyword_index = -1
+        
+        for i, part in enumerate(actual_args):
+            if part.lower() in type_keywords_map:
+                if i > 0 and i < len(actual_args) - 1:
+                    found_keyword = part
+                    keyword_index = i
+                    break
+        
+        if not found_keyword:
+            yield event.plain_result(
+                "格式错误或参数不足！\n"
+                "格式: /bind <按钮文字> <类型> <值>\n"
+                "类型必须是: 指令, command, 网址, url"
+            )
+            return
+
+        text = " ".join(actual_args[:keyword_index])
+        value = " ".join(actual_args[keyword_index+1:])
+        btn_type = type_keywords_map[found_keyword.lower()]
+
         buttons = load_buttons_data()
         found = False
         for button in buttons:
@@ -215,7 +246,15 @@ class DynamicButtonFrameworkPlugin(Star):
 
     @filter.command("unbind", alias={"解绑"})
     @filter.permission_type(PERMISSION_VALUE)
-    async def unbind_button(self, event: AstrMessageEvent, text: str):
+    async def unbind_button(self, event: AstrMessageEvent):
+        full_args = event.message_str.strip().split()
+        
+        if len(full_args) < 2:
+            yield event.plain_result("参数缺失！请输入要解绑的按钮的完整文字。")
+            return
+        
+        text = " ".join(full_args[1:])
+
         buttons = load_buttons_data()
         button_to_remove = next((b for b in buttons if b.get("text") == text), None)
         
