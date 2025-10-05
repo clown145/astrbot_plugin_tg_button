@@ -72,4 +72,5 @@ const TG_HOST = "generativelanguage.googleapis.com";
 ```
 
 
-然后，将您程序中所有对 `generativelanguage.googleapis.com` 的请求，替换为您的 Worker 域名，即可实现代理。
+然后，将您程序中所有对 `generativelanguage.googleapis.com` 的请求，替换为您的 Worker 域名，即可实现代理。(有时候会随机到香港的ip导致反代不可用，不稳定，推荐还是使用大佬们的反代地址。)
+
