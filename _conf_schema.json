@@ -9,5 +9,24 @@
     "type": "string",
     "options": ["user", "admin"],
     "default": "admin"
+  },
+  "menu_header_text": {
+    "description": "调用 /menu 指令时，按钮上方显示的提示文字。",
+    "type": "string",
+    "default": "请选择功能："
+  },
+  "button_layout_mode": {
+    "description": "按钮的排列方式。'column' 为纵向排列，'row' 为横向排列。",
+    "type": "string",
+    "options": [
+      "column",
+      "row"
+    ],
+    "default": "column"
+  },
+  "buttons_per_line": {
+    "description": "设置每行/每列的按钮数量。纵向模式下此项无效。横向模式下代表每行排列多少个按钮后换行。",
+    "type": "int",
+    "default": 3
   }
 }
