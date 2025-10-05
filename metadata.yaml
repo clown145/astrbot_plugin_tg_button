@@ -1,0 +1,5 @@
+name: astrbot_plugin_tg_button
+author: 随风潜入夜
+description: 一个可以使用telegram按钮的插件。
+version: 1.0.0
+repo: "https://github.com/clown145/astrbot_plugin_tg_button"

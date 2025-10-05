@@ -1,0 +1,13 @@
+{
+  "menu_command": {
+    "description": "用于调出按钮菜单的指令名（无需斜杠 /）。",
+    "type": "string",
+    "default": "menu"
+  },
+  "bind_permission": {
+    "description": "能够使用 'bind' 和 'unbind' 指令的最低权限。",
+    "type": "string",
+    "options": ["user", "admin"],
+    "default": "admin"
+  }
+}
