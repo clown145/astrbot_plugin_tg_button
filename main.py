@@ -52,17 +52,23 @@ except json.JSONDecodeError as e:
     logger.error(f"解析配置文件 {PLUGIN_NAME}_config.json 失败: {e}，将使用默认值。")
     plugin_config = {}
 
-
 MENU_COMMAND = plugin_config.get("menu_command", "menu")
 BIND_PERMISSION_LEVEL = plugin_config.get("bind_permission", "admin")
 PERMISSION_VALUE = filter.PermissionType.ADMIN if BIND_PERMISSION_LEVEL == "admin" else filter.PermissionType.USER
+MENU_HEADER = plugin_config.get("menu_header_text", "请选择功能：")
+LAYOUT_MODE = plugin_config.get("button_layout_mode", "column")
+try:
+    BUTTONS_PER_LINE = int(plugin_config.get("buttons_per_line", 3))
+    if BUTTONS_PER_LINE <= 0: BUTTONS_PER_LINE = 3
+except (ValueError, TypeError):
+    BUTTONS_PER_LINE = 3
 
 
 @register(
     PLUGIN_NAME,
     "clown145",
     "一个可以使用telegram按钮的插件",
-    "1.0.0",
+    "1.0.1",
     "https://github.com/clown145/astrbot_plugin_tg_button",
 )
 class DynamicButtonFrameworkPlugin(Star):
@@ -77,30 +83,24 @@ class DynamicButtonFrameworkPlugin(Star):
         if not Application:
             logger.error("Dynamic Button Framework 插件因缺少 Telegram 库而无法注册回调。")
             return
-        
         platform = self.context.get_platform("telegram")
         if not platform:
             logger.warning("未找到 Telegram 平台实例，无法注册按钮回调。")
             return
-
         async def button_callback_handler(update, context):
             query = update.callback_query
             if not query or not query.data or not query.data.startswith(self.CALLBACK_PREFIX_CMD):
                 if query: await query.answer()
                 return
-
             await query.answer()
             command_text = query.data[len(self.CALLBACK_PREFIX_CMD):]
             logger.info(f"用户 {query.from_user.id} 通过按钮触发指令: {command_text}")
-            
             try:
                 client: ExtBot = platform.get_client()
                 fake_message = AstrBotMessage()
-                
                 is_private = query.message.chat.type == 'private'
                 chat_id = str(query.message.chat.id)
                 thread_id = str(query.message.message_thread_id) if not is_private and query.message.message_thread_id else None
-
                 if is_private:
                     fake_message.type = MessageType.FRIEND_MESSAGE
                     fake_message.group_id = ""
@@ -109,7 +109,6 @@ class DynamicButtonFrameworkPlugin(Star):
                     fake_message.type = MessageType.GROUP_MESSAGE
                     fake_message.group_id = f"{chat_id}#{thread_id}" if thread_id else chat_id
                     fake_message.session_id = fake_message.group_id
-                
                 fake_message.self_id = str(client.id)
                 fake_message.message_id = str(query.message.message_id) + "_btn_trigger"
                 fake_message.sender = MessageMember(
@@ -120,22 +119,15 @@ class DynamicButtonFrameworkPlugin(Star):
                 fake_message.raw_message = update
                 fake_message.timestamp = int(query.message.date.timestamp())
                 fake_message.message = [Plain(command_text)]
-                
                 fake_event = TelegramPlatformEvent(
-                    message_str=command_text,
-                    message_obj=fake_message,
-                    platform_meta=platform.meta(),
-                    session_id=fake_message.session_id,
-                    client=client
+                    message_str=command_text, message_obj=fake_message,
+                    platform_meta=platform.meta(), session_id=fake_message.session_id, client=client
                 )
                 fake_event.context = self.context
                 fake_event.is_at_or_wake_command = True
-                
                 self.context.get_event_queue().put_nowait(fake_event)
-
             except Exception as e:
                 logger.error(f"模拟事件并重新分发时出错: {e}", exc_info=True)
-
         if hasattr(platform, 'application'):
             platform.application.add_handler(CallbackQueryHandler(button_callback_handler), group=1)
             logger.info("成功注册 Telegram 动态按钮回调处理器。")
@@ -150,8 +142,8 @@ class DynamicButtonFrameworkPlugin(Star):
         if not buttons_data:
             yield event.plain_result("当前未配置任何按钮。")
             return
-        
-        keyboard = []
+
+        all_buttons = []
         for button_def in buttons_data:
             text, btn_type, value = button_def.get("text"), button_def.get("type"), button_def.get("value")
             if not all((text, btn_type, value)):
@@ -164,11 +156,20 @@ class DynamicButtonFrameworkPlugin(Star):
                 button = InlineKeyboardButton(text, url=value)
             
             if button:
-                keyboard.append([button])
+                all_buttons.append(button)
 
-        if not keyboard:
+        if not all_buttons:
             yield event.plain_result("按钮数据配置不正确，无法生成菜单。")
             return
+
+        keyboard = []
+        if LAYOUT_MODE == 'row':
+            chunk_size = BUTTONS_PER_LINE
+            for i in range(0, len(all_buttons), chunk_size):
+                keyboard.append(all_buttons[i:i + chunk_size])
+        else:
+            for button in all_buttons:
+                keyboard.append([button])
         
         try:
             platform = self.context.get_platform("telegram")
@@ -179,7 +180,7 @@ class DynamicButtonFrameworkPlugin(Star):
             
             await client.send_message(
                 chat_id=chat_id, 
-                text="请选择功能：", 
+                text=MENU_HEADER,
                 reply_markup=InlineKeyboardMarkup(keyboard), 
                 message_thread_id=thread_id
             )
@@ -193,44 +194,28 @@ class DynamicButtonFrameworkPlugin(Star):
     @filter.permission_type(PERMISSION_VALUE) 
     async def bind_button(self, event: AstrMessageEvent):
         args_str = event.message_str.strip()
-        
         arg_parts = args_str.split()
         if len(arg_parts) < 3:
             yield event.plain_result(
-                "格式错误或参数不足！\n"
-                "格式: /bind <按钮文字> <类型> <值>\n"
-                "例如: /bind 搜索谷歌 指令 search google"
+                "格式错误或参数不足！\n格式: /bind <按钮文字> <类型> <值>\n例如: /bind 搜索谷歌 指令 search google"
             )
             return
-        
         actual_args = arg_parts[1:]
-        
-        type_keywords_map = {
-            "指令": "command", "command": "command",
-            "网址": "url", "url": "url"
-        }
+        type_keywords_map = {"指令": "command", "command": "command", "网址": "url", "url": "url"}
         found_keyword = None
         keyword_index = -1
-        
         for i, part in enumerate(actual_args):
             if part.lower() in type_keywords_map:
                 if i > 0 and i < len(actual_args) - 1:
                     found_keyword = part
                     keyword_index = i
                     break
-        
         if not found_keyword:
-            yield event.plain_result(
-                "格式错误或参数不足！\n"
-                "格式: /bind <按钮文字> <类型> <值>\n"
-                "类型必须是: 指令, command, 网址, url"
-            )
+            yield event.plain_result("格式错误或参数不足！\n格式: /bind <按钮文字> <类型> <值>\n类型必须是: 指令, command, 网址, url")
             return
-
         text = " ".join(actual_args[:keyword_index])
         value = " ".join(actual_args[keyword_index+1:])
         btn_type = type_keywords_map[found_keyword.lower()]
-
         buttons = load_buttons_data()
         found = False
         for button in buttons:
@@ -240,7 +225,6 @@ class DynamicButtonFrameworkPlugin(Star):
                 break
         if not found:
             buttons.append({"text": text, "type": btn_type, "value": value})
-        
         save_buttons_data(buttons)
         yield event.plain_result(f"✅ 按钮 '{text}' 已成功绑定！")
 
@@ -248,16 +232,12 @@ class DynamicButtonFrameworkPlugin(Star):
     @filter.permission_type(PERMISSION_VALUE)
     async def unbind_button(self, event: AstrMessageEvent):
         full_args = event.message_str.strip().split()
-        
         if len(full_args) < 2:
             yield event.plain_result("参数缺失！请输入要解绑的按钮的完整文字。")
             return
-        
         text = " ".join(full_args[1:])
-
         buttons = load_buttons_data()
         button_to_remove = next((b for b in buttons if b.get("text") == text), None)
-        
         if button_to_remove:
             buttons.remove(button_to_remove)
             save_buttons_data(buttons)
