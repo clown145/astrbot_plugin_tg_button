@@ -15,16 +15,14 @@ try:
     from telegram.ext import Application, CallbackQueryHandler, ExtBot
 except ImportError:
     logger.error("Telegram 库未安装，请在 AstrBot 环境中执行: pip install python-telegram-bot")
-    InlineKeyboardButton, InlineKeyboardMarkup, Application, CallbackQueryHandler, ExtBot = None, None, None, None, None
+    Application, ExtBot, CallbackQueryHandler, InlineKeyboardMarkup, InlineKeyboardButton = None, None, None, None, None
 
 PLUGIN_NAME = "astrbot_plugin_tg_button"
 
 def get_plugin_data_path() -> Path:
-    """获取插件的标准数据目录"""
     return StarTools.get_data_dir(PLUGIN_NAME)
 
 def load_buttons_data() -> List[Dict]:
-    """从插件数据目录加载按钮配置"""
     data_file = get_plugin_data_path() / "buttons.json"
     if not data_file.exists():
         return []
@@ -36,7 +34,6 @@ def load_buttons_data() -> List[Dict]:
         return []
 
 def save_buttons_data(data: List[Dict]):
-    """将按钮配置保存到插件数据目录"""
     try:
         data_path = get_plugin_data_path()
         data_path.mkdir(parents=True, exist_ok=True)
@@ -46,7 +43,7 @@ def save_buttons_data(data: List[Dict]):
         logger.error(f"保存按钮数据失败: {e}")
 
 try:
-    with open("data/config/dynamic_button_framework_config.json", "r", encoding="utf-8") as f:
+    with open(f"data/config/{PLUGIN_NAME}_config.json", "r", encoding="utf-8-sig") as f:
         plugin_config = json.load(f)
 except FileNotFoundError:
     logger.warning("按钮框架插件的配置文件未找到，将使用默认值。")
@@ -58,7 +55,7 @@ PERMISSION_VALUE = filter.PermissionType.ADMIN if BIND_PERMISSION_LEVEL == "admi
 
 
 @register(
-    "astrbot_plugin_tg_button",
+    PLUGIN_NAME,
     "clown145",
     "一个可以使用telegram按钮的插件",
     "1.0.0",
@@ -69,11 +66,82 @@ class DynamicButtonFrameworkPlugin(Star):
         super().__init__(context)
         self.config = config
         self.CALLBACK_PREFIX_CMD = "final_btn_cmd:"
+        # 移除 asyncio.create_task 和旧的初始化方法调用
+        logger.info(f"动态按钮插件已加载，菜单指令为 '/{MENU_COMMAND}'。回调将在 AstrBot 完全启动后注册。")
+
+    @filter.on_astrbot_loaded()
+    async def _initialize_telegram_callbacks(self):
+        """
+        在 AstrBot 完全加载后安全地注册 Telegram 回调。
+        """
         if not Application:
-            logger.error("Dynamic Button Framework 插件因缺少 telegram 库而无法完全启动。")
+            logger.error("Dynamic Button Framework 插件因缺少 Telegram 库而无法注册回调。")
             return
-        asyncio.create_task(self.register_telegram_callbacks())
-        logger.info(f"动态按钮插件已加载，菜单指令为 '/{MENU_COMMAND}'。")
+        
+        platform = self.context.get_platform("telegram")
+        if not platform:
+            logger.warning("未找到 Telegram 平台实例，无法注册按钮回调。")
+            return
+
+        async def button_callback_handler(update, context):
+            query = update.callback_query
+            if not query or not query.data or not query.data.startswith(self.CALLBACK_PREFIX_CMD):
+                if query: await query.answer()
+                return
+
+            await query.answer()
+            command_text = query.data[len(self.CALLBACK_PREFIX_CMD):]
+            logger.info(f"用户 {query.from_user.id} 通过按钮触发指令: {command_text}")
+            
+            try:
+                client: ExtBot = platform.get_client()
+                fake_message = AstrBotMessage()
+                
+                is_private = query.message.chat.type == 'private'
+                chat_id = str(query.message.chat.id)
+                thread_id = str(query.message.message_thread_id) if not is_private and query.message.message_thread_id else None
+
+                if is_private:
+                    fake_message.type = MessageType.FRIEND_MESSAGE
+                    fake_message.group_id = ""
+                    fake_message.session_id = chat_id
+                else:
+                    fake_message.type = MessageType.GROUP_MESSAGE
+                    fake_message.group_id = f"{chat_id}#{thread_id}" if thread_id else chat_id
+                    fake_message.session_id = fake_message.group_id
+                
+                fake_message.self_id = str(client.id)
+                fake_message.message_id = str(query.message.message_id) + "_btn_trigger"
+                fake_message.sender = MessageMember(
+                    user_id=str(query.from_user.id), 
+                    nickname=query.from_user.full_name or query.from_user.username or "Unknown"
+                )
+                fake_message.message_str = command_text
+                fake_message.raw_message = update
+                fake_message.timestamp = int(query.message.date.timestamp())
+                fake_message.message = [Plain(command_text)]
+                
+                fake_event = TelegramPlatformEvent(
+                    message_str=command_text,
+                    message_obj=fake_message,
+                    platform_meta=platform.meta(),
+                    session_id=fake_message.session_id,
+                    client=client
+                )
+                fake_event.context = self.context
+                fake_event.is_at_or_wake_command = True
+                
+                self.context.get_event_queue().put_nowait(fake_event)
+
+            except Exception as e:
+                logger.error(f"模拟事件并重新分发时出错: {e}", exc_info=True)
+
+        if hasattr(platform, 'application'):
+            platform.application.add_handler(CallbackQueryHandler(button_callback_handler), group=1)
+            logger.info("成功注册 Telegram 动态按钮回调处理器。")
+        else:
+            logger.error("无法注册回调处理器：platform 对象没有 'application' 属性。")
+    
 
     @filter.command(MENU_COMMAND)
     async def send_menu(self, event: AstrMessageEvent):
@@ -157,74 +225,3 @@ class DynamicButtonFrameworkPlugin(Star):
             yield event.plain_result(f"🗑️ 按钮 '{text}' 已成功解绑！")
         else:
             yield event.plain_result(f"❓ 未找到名为 '{text}' 的按钮。")
-
-
-    async def register_telegram_callbacks(self):
-        await asyncio.sleep(5)
-        platform = self.context.get_platform("telegram")
-        if not platform:
-            return
-
-        async def button_callback_handler(update, context):
-            query = update.callback_query
-            if not query or not query.data or not query.data.startswith(self.CALLBACK_PREFIX_CMD):
-                if query: await query.answer()
-                return
-
-            await query.answer()
-            command_text = query.data[len(self.CALLBACK_PREFIX_CMD):]
-            logger.info(f"用户 {query.from_user.id} 通过按钮触发指令: {command_text}")
-            
-            try:
-                client: ExtBot = platform.get_client()
-                
-                # 构造一个伪造的 AstrBot 消息事件以重新分发
-                fake_message = AstrBotMessage()
-                
-                is_private = query.message.chat.type == 'private'
-                chat_id = str(query.message.chat.id)
-                thread_id = str(query.message.message_thread_id) if not is_private and query.message.message_thread_id else None
-
-                if is_private:
-                    fake_message.type = MessageType.FRIEND_MESSAGE
-                    fake_message.group_id = ""
-                    fake_message.session_id = chat_id
-                else:
-                    fake_message.type = MessageType.GROUP_MESSAGE
-                    # 如果有 thread_id (话题)，则将其组合到 group_id 和 session_id 中
-                    fake_message.group_id = f"{chat_id}#{thread_id}" if thread_id else chat_id
-                    fake_message.session_id = fake_message.group_id
-                
-                fake_message.self_id = str(client.id)
-                fake_message.message_id = str(query.message.message_id) + "_btn_trigger"
-                fake_message.sender = MessageMember(
-                    user_id=str(query.from_user.id), 
-                    nickname=query.from_user.full_name or query.from_user.username or "Unknown"
-                )
-                fake_message.message_str = command_text
-                fake_message.raw_message = update
-                fake_message.timestamp = int(query.message.date.timestamp())
-                fake_message.message = [Plain(command_text)]
-                
-                fake_event = TelegramPlatformEvent(
-                    message_str=command_text,
-                    message_obj=fake_message,
-                    platform_meta=platform.meta(),
-                    session_id=fake_message.session_id,
-                    client=client
-                )
-
-                fake_event.context = self.context
-                fake_event.is_at_or_wake_command = True
-                
-                self.context.get_event_queue().put_nowait(fake_event)
-
-            except Exception as e:
-                logger.error(f"模拟事件并重新分发时出错: {e}", exc_info=True)
-
-        if hasattr(platform, 'application'):
-            platform.application.add_handler(CallbackQueryHandler(button_callback_handler), group=1)
-            logger.info("成功注册 Telegram 动态按钮回调处理器到 platform.application。")
-        else:
-
-            logger.error("无法注册回调处理器：platform 对象没有 'application' 属性。")
