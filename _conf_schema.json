@@ -4,12 +4,6 @@
     "type": "string",
     "default": "menu"
   },
-  "bind_permission": {
-    "description": "能够使用 'bind' 和 'unbind' 指令的最低权限。",
-    "type": "string",
-    "options": ["user", "admin"],
-    "default": "admin"
-  },
   "menu_header_text": {
     "description": "调用 /menu 指令时，按钮上方显示的提示文字。",
     "type": "string",
@@ -30,3 +24,4 @@
     "default": 3
   }
 }
+
