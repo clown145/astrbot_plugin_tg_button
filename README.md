@@ -114,7 +114,7 @@ _✨ 为 AstrBot 在 Telegram 中添加交互式按钮的插件，现已更新 W
 *   **[📄 动作 (Action) 按钮使用指南](./md/action_buttons.md)**
 *   **[🌐 WebApp 按钮使用指南](./md/webapp_buttons.md)**
 *   **[🔗 Telegram `tg://` 协议链接大全](./md/tg_links.md)**
-
+*   **[⚙️ 按钮类型参考指南](./md/button_types.md)**
 ---
 
 ## ⌨️ 关于旧版指令的说明
@@ -129,4 +129,5 @@ _✨ 为 AstrBot 在 Telegram 中添加交互式按钮的插件，现已更新 W
 ---
 
 ## 📝 开发说明
+
 本插件的开发过程得到了 AI 的大量协助，如果代码或功能中存在任何不妥之处，敬请谅解并通过 Issue 提出，感谢您的支持！
