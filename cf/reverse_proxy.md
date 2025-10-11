@@ -57,20 +57,3 @@ Cloudflare 提供的默认 `workers.dev` 域名在国内通常无法访问，因
 4.  保存配置并重启 AstrBot。
 
 至此，您的机器人所有与 Telegram API 的通信都将通过您自己的 Cloudflare 反代服务器进行，解决了网络访问问题。
-
----
-
-## ✨ 举一反三：反代 Gemini 等其他 API
-
-本教程中的 Worker 代码本质上是一个通用的反向代理。您也可以用它来代理其他被墙的 API，例如 Google Gemini。
-
-只需修改 `worker.js` 文件中的第一行即可：
-
-```javascript
-// 将 TG_HOST 的值修改为您需要代理的目标 API 域名
-const TG_HOST = "generativelanguage.googleapis.com";
-```
-
-
-然后，将您程序中所有对 `generativelanguage.googleapis.com` 的请求，替换为您的 Worker 域名，即可实现代理。(有时候会随机到香港的ip导致反代不可用，不稳定，推荐还是使用大佬们的反代地址。)
-

@@ -133,26 +133,62 @@ textarea {
 
 /* Tab Navigation */
 .tab-nav {
-  border-bottom: 1px solid var(--border-color);
-  margin-bottom: 20px;
+  position: relative;
+  display: flex;
+  background-color: var(--bg-secondary);
+  padding: 5px;
+  border-radius: 50px; /* Make the container a capsule */
+  filter: url(#gooey); /* Apply the gooey effect */
+  margin-bottom: 30px;
 }
+
+#tabIndicator {
+  position: absolute;
+  top: 5px;
+  height: calc(100% - 10px);
+  background-color: var(--accent-primary);
+  border-radius: 50px;
+  transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1); /* Smooth transition */
+  z-index: 1;
+}
+
 .tab-link {
+  flex: 1;
   background: none;
   border: none;
-  border-bottom: 3px solid transparent;
   padding: 12px 16px;
   cursor: pointer;
   font-size: 16px;
   color: var(--fg-secondary);
-  border-radius: 0;
-}
-.tab-link.active {
-  border-bottom-color: var(--accent-primary);
-  color: var(--fg-primary);
+  border-radius: 50px; /* Each link is also a capsule */
   font-weight: 600;
+  text-align: center;
+  position: relative;
+  z-index: 2; /* Links must be above the indicator */
+  transition: color 0.4s ease;
 }
-.tab-content { display: none; }
-.tab-content.active { display: block; }
+
+.tab-link.active {
+  color: var(--bg-primary); /* Dark text on the bright indicator */
+}
+
+.tab-link:hover {
+  background-color: transparent; /* Override button's green hover */
+}
+
+.tab-link:not(.active):hover {
+  color: var(--fg-primary);
+  background-color: transparent !important; /* Ensure no background change */
+}
+.tab-content {
+  opacity: 0;
+  transition: opacity 0.3s ease-in-out;
+  display: none;
+}
+.tab-content.active {
+  opacity: 1;
+  display: block;
+}
 
 /* Two-column layout for menus and button bank */
 .layout-container {

@@ -5,13 +5,23 @@
 
 _✨ 为 AstrBot 在 Telegram 中添加交互式按钮的插件，现已更新 WebUI 以方便管理。 ✨_
 
-[![Version](https://img.shields.io/badge/Version-1.1.0-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
+[![Version](https://img.shields.io/badge/Version-1.1.1-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
 [![AstrBot](https://img.shields.io/badge/AstrBot-v4.0%2B-orange.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![GitHub](https://img.shields.io/badge/作者-clown145-blue)](https://github.com/clown145)
 
 </div>
+
+## 主要更新 (V1.1.1)
+
+此版本主要针对 WebUI 进行了全面的功能增强和体验优化，并修复了若干 Bug。
+
+*   **功能**: 在 WebUI 中补全了对“插入文本”、“转发查询”和“原始回调”等按钮类型的支持。
+*   **优化**: 重构了 WebUI 的弹窗系统和标签页动画，交互体验更统一、更流畅。
+*   **修复**: 解决了重复点击、鼠标悬停和标签页切换时遇到的多个视觉及逻辑 Bug。
+
+---
 
 ## 主要更新 (V1.1.0)
 

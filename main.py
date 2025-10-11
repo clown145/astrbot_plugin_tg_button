@@ -107,14 +107,14 @@ MENU_COMMAND = _INITIAL_SETTINGS["menu_command"]
     PLUGIN_NAME,
     "clown145",
     "一个可以通过 Telegram 按钮与自定义 WebUI 管理的插件",
-    "1.1.0",
+    "1.1.1",
     "https://github.com/clown145/astrbot_plugin_tg_button",
 )
 class DynamicButtonFrameworkPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
-        self.settings = _build_settings(_load_raw_config())
+        self.settings = _build_settings(config)
         self.menu_command = self.settings["menu_command"]
         self.menu_header = self.settings["menu_header_text"]
         # Layout is determined per button via row/column settings
@@ -347,6 +347,10 @@ class DynamicButtonFrameworkPlugin(Star):
         reply_markup = markup if markup else None
         text_to_use = result.new_text or header or getattr(message, "text", self.menu_header)
         if result.should_edit_message or result.new_text:
+            if text_to_use == message.text and message.reply_markup == reply_markup:
+                await query.answer()
+                return
+
             try:
                 await client.edit_message_text(
                     chat_id=message.chat.id,
@@ -360,6 +364,10 @@ class DynamicButtonFrameworkPlugin(Star):
                 await query.answer("动作执行成功，但更新消息失败。", show_alert=True)
                 return
         elif reply_markup:
+            if message.reply_markup == reply_markup:
+                await query.answer()
+                return
+
             try:
                 await client.edit_message_reply_markup(
                     chat_id=message.chat.id,
@@ -566,7 +574,7 @@ class DynamicButtonFrameworkPlugin(Star):
             return InlineKeyboardButton(text, callback_data=raw_callback)
         btn_type = (override.get('type') or button.type or 'command').lower()
         if btn_type == 'raw':
-            callback_data = override.get('callback_data')
+            callback_data = override.get('callback_data') or button.payload.get('callback_data')
             if not callback_data:
                 return None
             return InlineKeyboardButton(text, callback_data=callback_data)
@@ -595,6 +603,9 @@ class DynamicButtonFrameworkPlugin(Star):
         if btn_type == 'inline_query':
             query_text = override.get('query') or button.payload.get('query', '')
             return InlineKeyboardButton(text, switch_inline_query_current_chat=query_text)
+        if btn_type == 'switch_inline_query':
+            query_text = override.get('query') or button.payload.get('query', '')
+            return InlineKeyboardButton(text, switch_inline_query=query_text)
         if btn_type == 'web_app':
             web_app_id = override.get('web_app_id') or button.payload.get('web_app_id')
             url = override.get('web_app_url') or override.get('url') or button.payload.get('url')
@@ -630,6 +641,7 @@ class DynamicButtonFrameworkPlugin(Star):
 
     @filter.command(MENU_COMMAND)
     async def send_menu(self, event: AstrMessageEvent):
+        """显示可交互的按钮菜单"""
         if self.webui_exclusive:
             yield event.plain_result("WebUI 独占模式已启用，请通过 WebUI 操作按钮。")
             return
@@ -669,6 +681,7 @@ class DynamicButtonFrameworkPlugin(Star):
     @filter.command("bind", alias={"绑定"})
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def bind_button(self, event: AstrMessageEvent):
+        """绑定一个新的按钮"""
         if self.webui_exclusive:
             yield event.plain_result("WebUI 独占模式已启用，请在 WebUI 中管理按钮。")
             return
@@ -707,6 +720,7 @@ class DynamicButtonFrameworkPlugin(Star):
     @filter.command("unbind", alias={"解绑"})
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def unbind_button(self, event: AstrMessageEvent):
+        """解绑一个已有的按钮"""
         if self.webui_exclusive:
             yield event.plain_result("WebUI 独占模式已启用，请在 WebUI 中管理按钮。")
             return

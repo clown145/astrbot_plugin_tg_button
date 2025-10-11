@@ -19,6 +19,7 @@
     </div>
 
     <div class="tab-nav">
+        <div id="tabIndicator"></div>
         <button class="tab-link active" data-tab="tab-layout">菜单与布局</button>
         <button class="tab-link" data-tab="tab-actions">动作 (Actions)</button>
         <button class="tab-link" data-tab="tab-webapps">WebApp</button>
@@ -79,5 +80,16 @@
 
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
   <script src="/static/main.js"></script>
+
+  <!-- SVG Filter for Gooey Effect -->
+  <svg style="position:absolute; width:0; height:0;">
+    <defs>
+      <filter id="gooey">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur" />
+        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="goo" />
+        <feBlend in="SourceGraphic" in2="goo" />
+      </filter>
+    </defs>
+  </svg>
 </body>
 </html>
