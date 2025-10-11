@@ -1,0 +1,319 @@
+:root {
+  --bg-primary: #1a1d21;
+  --bg-secondary: #2c313a;
+  --bg-tertiary: #404754;
+  --fg-primary: #e1e1e1;
+  --fg-secondary: #a0a0a0;
+  --accent-primary: #00ff7f; /* Tech Green */
+  --accent-secondary: #00b359;
+  --danger-primary: #ff4d4d;
+  --danger-secondary: #b32d2d;
+  --border-color: #444c56;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-primary);
+  color: var(--fg-primary);
+}
+
+header {
+  padding: 16px 24px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+main {
+  padding: 20px 24px;
+  max-width: 1400px; /* Increased max-width for two columns */
+  margin: 0 auto;
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+  color: var(--accent-primary);
+}
+h2 {
+  font-size: 20px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 8px;
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+button, select, input, textarea {
+  font-family: inherit;
+  background-color: var(--bg-tertiary);
+  color: var(--fg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+button {
+  background-color: var(--accent-secondary);
+  color: var(--bg-primary);
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+button:hover {
+  background-color: var(--accent-primary);
+}
+button.secondary {
+  background: var(--bg-tertiary);
+  color: var(--fg-primary);
+}
+button.secondary:hover {
+  background: var(--bg-secondary);
+}
+button.danger {
+  background: var(--danger-primary);
+  color: #fff;
+}
+button.danger:hover {
+  background: var(--danger-secondary);
+}
+
+details {
+  margin-bottom: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+details summary {
+  padding: 12px 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+details[open] summary {
+  border-bottom: 1px solid var(--border-color);
+}
+.details-content {
+  padding: 16px;
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.field label {
+  font-weight: 600;
+  text-align: right;
+}
+.field input, .field textarea, .field select {
+  width: 100%;
+  box-sizing: border-box;
+}
+textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+}
+
+/* Tab Navigation */
+.tab-nav {
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 20px;
+}
+.tab-link {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  padding: 12px 16px;
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--fg-secondary);
+  border-radius: 0;
+}
+.tab-link.active {
+  border-bottom-color: var(--accent-primary);
+  color: var(--fg-primary);
+  font-weight: 600;
+}
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Two-column layout for menus and button bank */
+.layout-container {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+#button-bank-column {
+  position: sticky;
+  top: 20px;
+}
+
+#unassignedButtonsContainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  min-height: 100px;
+  border: 2px dashed var(--border-color);
+  border-radius: 8px;
+  background-color: var(--bg-primary);
+}
+
+/* NEW: Controls for the button bank */
+.button-bank-controls {
+    margin-top: 12px;
+    display: flex;
+}
+
+.button-bank-controls button {
+    width: 100%;
+}
+
+
+/* Menu Layout & Button Grid */
+.menu-layout-grid {
+  background: var(--bg-primary);
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+.menu-layout-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  min-height: 44px;
+  align-items: stretch;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  padding: 4px;
+}
+.menu-layout-row.empty-row {
+  /* No special styling needed other than the base .menu-layout-row */
+}
+/* SortableJS Classes */
+.sortable-ghost {
+  opacity: 0.4;
+  background: var(--accent-secondary);
+}
+.sortable-drag {
+  opacity: 0.9;
+  transform: scale(1.05);
+  box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+}
+
+.menu-btn-wrapper {
+  flex: 1; /* MODIFIED: This is the main fix for alignment. Was 'flex: 1 1 auto;' */
+  min-width: 80px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: var(--bg-tertiary);
+  color: var(--fg-primary);
+  border-radius: 6px;
+  padding: 10px;
+  text-align: center;
+  cursor: grab;
+  transition: background-color 0.2s, transform 0.2s;
+  user-select: none;
+  /* ADDED: These lines handle long text gracefully */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-btn-wrapper:hover {
+  background-color: #4f5868;
+}
+.menu-btn-wrapper:active {
+    cursor: grabbing;
+}
+
+
+.menu-controls {
+  margin-top: 16px;
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+/* Modal Styles */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0.3s;
+}
+.modal-overlay.visible {
+  opacity: 1;
+  visibility: visible;
+}
+.modal-container {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 700px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  transform: scale(0.95);
+  transition: transform 0.3s ease;
+}
+.modal-overlay.visible .modal-container {
+  transform: scale(1);
+}
+.modal-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.modal-header h2 {
+  border: none; margin: 0; padding: 0;
+  color: var(--accent-primary);
+}
+.modal-header .close-btn {
+  background: none; border: none; font-size: 24px; color: var(--fg-secondary); cursor: pointer;
+}
+.modal-body {
+  padding: 24px;
+  overflow-y: auto;
+}
+.modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.modal-footer .actions-left, .modal-footer .actions-right {
+  display: flex;
+  gap: 12px;
+}

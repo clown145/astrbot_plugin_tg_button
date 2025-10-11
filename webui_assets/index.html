@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>TG Button WebUI</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Telegram 按钮管理 WebUI</h1>
+    <p class="muted">在一个统一的界面中，通过可视化布局、弹窗编辑来管理您的按钮、菜单和动作。</p>
+  </header>
+  <main>
+    <div class="toolbar">
+      <button id="refreshBtn">刷新</button>
+      <button id="saveBtn">保存全部</button>
+      <button id="exportBtn" class="secondary">导出 JSON</button>
+      <span class="muted" style="margin-left: auto;">如需鉴权，可在 URL 上携带 <code>?token=YOUR_TOKEN</code>。</span>
+    </div>
+
+    <div class="tab-nav">
+        <button class="tab-link active" data-tab="tab-layout">菜单与布局</button>
+        <button class="tab-link" data-tab="tab-actions">动作 (Actions)</button>
+        <button class="tab-link" data-tab="tab-webapps">WebApp</button>
+    </div>
+
+    <div id="tab-layout" class="tab-content active">
+      <div class="layout-container">
+        <div id="menus-column">
+          <section id="menuSection">
+            <h2>菜单 (Menus) <button id="addMenuBtn">新增菜单</button></h2>
+            <div id="menusContainer"></div>
+          </section>
+        </div>
+        <div id="button-bank-column">
+          <section id="buttonBankSection">
+            <h2>未分配的按钮</h2>
+            <div id="unassignedButtonsContainer" class="menu-layout-row">
+              <p class="muted">长按并拖拽到左侧菜单的行中进行分配。</p>
+            </div>
+            <div class="button-bank-controls">
+              <button id="addUnassignedBtn">创建新按钮</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-actions" class="tab-content">
+        <section id="actionSection">
+          <h2>动作 (Actions) <button id="addActionBtn">新增动作</button></h2>
+          <div id="actionsContainer"></div>
+        </section>
+    </div>
+
+    <div id="tab-webapps" class="tab-content">
+        <section id="webappSection">
+          <h2>WebApp 管理 <button id="addWebappBtn">新增 WebApp</button></h2>
+          <div id="webappsContainer"></div>
+        </section>
+    </div>
+  </main>
+
+  <!-- Modal Structure -->
+  <div id="modal" class="modal-overlay">
+    <div class="modal-container">
+      <div class="modal-header">
+        <h2 id="modalTitle">编辑</h2>
+        <button id="modalCloseBtn" class="close-btn">&times;</button>
+      </div>
+      <div id="modalBody" class="modal-body">
+        <!-- Modal content will be injected here -->
+      </div>
+      <div id="modalFooter" class="modal-footer">
+        <!-- Modal buttons will be injected here -->
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+  <script src="/static/main.js"></script>
+</body>
+</html>

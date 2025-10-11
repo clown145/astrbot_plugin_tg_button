@@ -1,27 +1,37 @@
 {
   "menu_command": {
-    "description": "用于调出按钮菜单的指令名（无需斜杠 /）。",
+    "description": "用于调出按钮菜单的指令名（无需斜杠 /）",
     "type": "string",
     "default": "menu"
   },
   "menu_header_text": {
-    "description": "调用 /menu 指令时，按钮上方显示的提示文字。",
+    "description": "调用 /menu 指令时，按钮上方显示的提示文字",
     "type": "string",
-    "default": "请选择功能："
+    "default": "请选择功能"
   },
-  "button_layout_mode": {
-    "description": "按钮的排列方式。'column' 为纵向排列，'row' 为横向排列。",
-    "type": "string",
-    "options": [
-      "column",
-      "row"
-    ],
-    "default": "column"
+  "webui_enabled": {
+    "description": "是否启用插件自带的按钮管理 WebUI。",
+    "type": "bool",
+    "default": false
   },
-  "buttons_per_line": {
-    "description": "设置每行/每列的按钮数量。纵向模式下此项无效。横向模式下代表每行排列多少个按钮后换行。",
+  "webui_port": {
+    "description": "WebUI 服务监听端口。",
     "type": "int",
-    "default": 3
+    "default": 17861
+  },
+  "webui_host": {
+    "description": "WebUI 服务监听地址。",
+    "type": "string",
+    "default": "127.0.0.1"
+  },
+  "webui_exclusive": {
+    "description": "启用 WebUI 时是否独占插件，开启后将暂停指令与回调功能，避免混用模式。",
+    "type": "bool",
+    "default": true
+  },
+  "webui_auth_token": {
+    "description": "（可选）访问 WebUI 时需要携带的认证 Token，若为空则不校验。",
+    "type": "string",
+    "default": ""
   }
 }
-
