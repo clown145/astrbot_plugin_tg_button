@@ -73,20 +73,23 @@ class WebUIServer:
                 self._runner = None
             self._app = None
 
-    async def _auth_middleware(self, request, handler):
-        if request.method == "OPTIONS":
-            return self._json_response({"status": "ok"})
+    async def _auth_middleware(self, app, handler):
+        async def middleware_handler(request):
+            if request.method == "OPTIONS":
+                # For OPTIONS requests, return CORS headers and stop processing.
+                return self._json_response({"status": "ok"})
 
-        # The root path and static files are always public
-        if request.path == '/' or request.path.startswith('/static/'):
+            # The root path and static files are always public
+            if request.path == '/' or request.path.startswith('/static/'):
+                return await handler(request)
+
+            # For other API paths, check the token
+            token = request.headers.get("X-Auth-Token") or request.query.get("token")
+            if token != self._auth_token:
+                return self._json_response({"error": "unauthorized"}, status=401)
+
             return await handler(request)
-
-        # For other API paths, check the token
-        token = request.headers.get("X-Auth-Token") or request.query.get("token")
-        if token != self._auth_token:
-            return self._json_response({"error": "unauthorized"}, status=401)
-
-        return await handler(request)
+        return middleware_handler
 
     def _setup_routes(self, app: "web.Application") -> None:
         app.router.add_get("/health", self._handle_health)

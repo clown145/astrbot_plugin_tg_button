@@ -5,6 +5,7 @@ from urllib.parse import quote_plus
 
 import httpx
 from jinja2 import Environment, StrictUndefined
+from jinja2.sandbox import SandboxedEnvironment
 
 try:
     import jmespath
@@ -46,7 +47,7 @@ class ActionExecutionResult:
 class ActionExecutor:
     def __init__(self, *, logger):
         self._logger = logger
-        self._template_env = Environment(
+        self._template_env = SandboxedEnvironment(
             autoescape=False,
             trim_blocks=True,
             lstrip_blocks=True,
