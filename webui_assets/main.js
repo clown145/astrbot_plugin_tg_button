@@ -173,7 +173,7 @@
             // 3. 模块化动作
             (modularActions || []).forEach(modAction => {
                 allActions[modAction.id] = {
-                    name: `[新] ${modAction.name}`,
+                    name: `${modAction.name}`,
                     description: modAction.description,
                     inputs: modAction.inputs,
                     outputs: modAction.outputs,
