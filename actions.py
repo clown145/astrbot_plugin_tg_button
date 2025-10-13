@@ -1,6 +1,10 @@
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .main import ActionRegistry, DynamicButtonFrameworkPlugin, ModularActionRegistry
+
 from urllib.parse import quote_plus
 
 import httpx
@@ -9,18 +13,19 @@ from jinja2.sandbox import SandboxedEnvironment
 
 try:
     import jmespath
-except ImportError:  # pragma: no cover - optional dependency
+except ImportError:  # 可选依赖
     jmespath = None
 
 try:
     from jsonpath_ng import parse as jsonpath_parse  # type: ignore
-except ImportError:  # pragma: no cover - optional dependency
+except ImportError:  # 可选依赖
     jsonpath_parse = None
 
 
 @dataclass
 class RuntimeContext:
     chat_id: str
+    chat_type: Optional[str] = None
     message_id: Optional[int] = None
     thread_id: Optional[int] = None
     user_id: Optional[str] = None
@@ -41,12 +46,15 @@ class ActionExecutionResult:
     data: Dict[str, Any] = field(default_factory=dict)
     button_title: Optional[str] = None
     button_overrides: List[Dict[str, Any]] = field(default_factory=list)
+    notification: Optional[Dict[str, Any]] = None
     web_app_launch: Optional[Dict[str, Any]] = None
 
 
 class ActionExecutor:
-    def __init__(self, *, logger):
+    def __init__(self, *, logger, registry: "ActionRegistry", modular_registry: "ModularActionRegistry"):
         self._logger = logger
+        self._registry = registry
+        self._modular_registry = modular_registry
         self._template_env = SandboxedEnvironment(
             autoescape=False,
             trim_blocks=True,
@@ -65,6 +73,7 @@ class ActionExecutor:
 
     async def execute(
         self,
+        plugin: "DynamicButtonFrameworkPlugin",
         action: Dict[str, Any],
         *,
         button: Dict[str, Any],
@@ -75,7 +84,301 @@ class ActionExecutor:
         kind = action.get("kind", "http")
         if kind == "http":
             return await self._execute_http(action, button=button, menu=menu, runtime=runtime, preview=preview)
+        if kind == "local":
+            return await self._execute_local(plugin, action, button=button, menu=menu, runtime=runtime, preview=preview)
+        if kind == "workflow":
+            return await self._execute_workflow(plugin, action, button=button, menu=menu, runtime=runtime, preview=preview)
         return ActionExecutionResult(success=False, error=f"未知的动作类型: {kind}")
+
+    def _find_action_definition(self, action_id: str, snapshot: "ButtonsModel") -> Optional[Dict[str, Any]]:
+        """从模块化动作或旧版动作中查找动作定义。"""
+        # 优先匹配模块化动作
+        modular_action = self._modular_registry.get(action_id)
+        if modular_action:
+            # 对于模块化动作，其“定义”就是 ModularAction 对象本身
+            return {"kind": "modular", "definition": modular_action}
+
+        # 回退到存储在状态文件中的旧版动作
+        legacy_action = snapshot.actions.get(action_id)
+        if legacy_action:
+            # 对于旧版动作，其“定义”是字典表示形式
+            return {"kind": legacy_action.kind, "definition": legacy_action.to_dict()}
+
+        return None
+
+    async def _execute_modular(
+        self,
+        action: "ModularAction",
+        *,
+        preview: bool = False,
+        input_params: Dict[str, Any],
+    ) -> ActionExecutionResult:
+        """执行一个新的模块化动作。"""
+        action_name = action.name
+        if preview:
+            return ActionExecutionResult(success=True, new_text=f"此为模块化动作 '{action_name}' 的预览。")
+
+        # 收集最终参数，并应用默认值
+        params_to_pass = {}
+        missing_params = []
+        for input_def in action.inputs:
+            input_name = input_def["name"]
+            if input_name in input_params:
+                params_to_pass[input_name] = input_params[input_name]
+            elif "default" in input_def:
+                params_to_pass[input_name] = input_def["default"]
+            else:
+                missing_params.append(input_name)
+
+        if missing_params:
+            error_msg = f"执行模块化动作 '{action_name}' 失败: 缺少输入参数: {', '.join(missing_params)}"
+            self._logger.error(error_msg)
+            return ActionExecutionResult(success=False, error=error_msg)
+
+        try:
+            # 执行动作的异步函数
+            result_dict = await action.execute(**params_to_pass)
+
+            if not isinstance(result_dict, dict):
+                self._logger.warning(f"模块化动作 '{action_name}' 的返回值不是一个字典，已忽略。")
+                result_dict = {}
+
+            # 动作的返回字典可以包含用于 UI 效果的特殊键，
+            # 任何其他键都被视为输出变量。
+            output_variables = {
+                key: value for key, value in result_dict.items()
+                if key not in ["new_text", "parse_mode", "next_menu_id", "button_overrides", "notification"]
+            }
+
+            return ActionExecutionResult(
+                success=True,
+                should_edit_message=bool(result_dict.get("new_text")),
+                new_text=result_dict.get("new_text"),
+                parse_mode=self._map_parse_mode(result_dict.get("parse_mode", "html")),
+                next_menu_id=result_dict.get("next_menu_id"),
+                button_overrides=result_dict.get("button_overrides", []),
+                notification=result_dict.get("notification"),
+                data={"variables": output_variables}
+            )
+        except Exception as exc:
+            self._logger.error(f"执行模块化动作 '{action_name}' 失败: {exc}", exc_info=True)
+            return ActionExecutionResult(success=False, error=f"执行模块化动作 '{action_name}' 时发生错误: {exc}")
+
+
+
+
+    async def _execute_workflow(
+        self,
+        plugin: "DynamicButtonFrameworkPlugin",
+        action: Dict[str, Any],
+        *,
+        button: Dict[str, Any],
+        menu: Dict[str, Any],
+        runtime: RuntimeContext,
+        preview: bool = False,
+    ) -> ActionExecutionResult:
+        workflow_id = action.get("config", {}).get("workflow_id")
+        if not workflow_id:
+            return ActionExecutionResult(success=False, error="工作流动作配置缺少 workflow_id")
+
+        if preview:
+            return ActionExecutionResult(success=True, new_text=f"此为工作流 ‘{workflow_id}’ 的预览。")
+
+        # 1. 从数据快照加载工作流定义
+        snapshot = await plugin.button_store.get_snapshot()
+        workflow_data = snapshot.workflows.get(workflow_id)
+        if not workflow_data:
+            return ActionExecutionResult(success=False, error=f"未找到 ID 为 ‘{workflow_id}’ 的工作流")
+
+        # 直接访问 WorkflowDefinition 对象的属性
+        nodes = workflow_data.nodes
+        edges = workflow_data.edges
+
+        if not nodes:
+            return ActionExecutionResult(success=True, new_text="工作流为空，执行完成。")
+
+        self._logger.info(f"开始执行工作流 ‘{workflow_id}’")
+
+        # 2. 构建依赖关系图并执行拓扑排序（卡恩算法）
+        adj: Dict[str, List[str]] = {node_id: [] for node_id in nodes}
+        in_degree: Dict[str, int] = {node_id: 0 for node_id in nodes}
+
+        for edge in edges:
+            # 直接访问 WorkflowEdge 对象的属性
+            source_node = edge.source_node
+            target_node = edge.target_node
+            if source_node in adj and target_node in in_degree:
+                adj[source_node].append(target_node)
+                in_degree[target_node] += 1
+
+        queue = [node_id for node_id in nodes if in_degree[node_id] == 0]
+        exec_order = []
+        while queue:
+            u = queue.pop(0)
+            exec_order.append(u)
+            for v in adj.get(u, []):
+                in_degree[v] -= 1
+                if in_degree[v] == 0:
+                    queue.append(v)
+
+        if len(exec_order) != len(nodes):
+            processed_nodes = set(exec_order)
+            cycle_nodes = [node_id for node_id in nodes if node_id not in processed_nodes]
+            error_msg = f"工作流 ‘{workflow_id}’ 执行失败: 检测到循环依赖。涉及节点: {', '.join(cycle_nodes)}"
+            self._logger.error(error_msg)
+            return ActionExecutionResult(success=False, error=error_msg)
+
+        # 3. 按顺序执行节点
+        node_outputs: Dict[str, Dict[str, Any]] = {}  # 格式: {节点ID: {输出名称: 值}}
+        final_result = ActionExecutionResult(success=True)
+        final_text_parts = []
+        global_variables = dict(runtime.variables)
+
+        for node_id in exec_order:
+            node_def = nodes[node_id]
+            # 直接访问 WorkflowNode 对象的属性
+            action_id = node_def.action_id
+            if not action_id:
+                self._logger.warning(f"  -> 跳过节点 '{node_id}'，因为它没有设置 action_id。")
+                continue
+
+            found_action = self._find_action_definition(action_id, snapshot)
+            if not found_action:
+                error_msg = f"工作流 ‘{workflow_id}’ 在节点 ‘{node_id}’ 执行失败: 未找到 ID 为 '{action_id}' 的动作定义。"
+                self._logger.error(error_msg)
+                return ActionExecutionResult(success=False, error=error_msg)
+
+            self._logger.info(f"  -> 执行节点 ‘{node_id}’ (动作: '{action_id}', 类型: '{found_action['kind']}')")
+
+            # 4. 为当前节点收集输入参数
+            input_params: Dict[str, Any] = {}
+            input_params.update(node_def.data) # 直接访问属性
+
+            for edge in edges:
+                 # 直接访问属性
+                if edge.target_node == node_id:
+                    source_node = edge.source_node
+                    source_output_name = edge.source_output
+                    target_input_name = edge.target_input
+
+                    if source_node in node_outputs and source_output_name in node_outputs[source_node]:
+                        input_params[target_input_name] = node_outputs[source_node][source_output_name]
+                    else:
+                        self._logger.warning(f"      - 输入 '{target_input_name}' 的值无法从上游节点 '{source_node}' 的输出 '{source_output_name}' 中找到。")
+
+            current_runtime_dict = runtime.__dict__.copy()
+            current_runtime_dict['variables'] = global_variables
+            current_runtime = RuntimeContext(**current_runtime_dict)
+
+            result: Optional[ActionExecutionResult] = None
+            try:
+                kind = found_action["kind"]
+                definition = found_action["definition"]
+
+                if kind == "modular":
+                    result = await self._execute_modular(definition, preview=preview, input_params=input_params)
+                elif kind == "local":
+                    current_runtime.variables.update(input_params)
+                    result = await self._execute_local(plugin, definition, button=button, menu=menu, runtime=current_runtime, preview=preview)
+                elif kind == "http":
+                    current_runtime.variables.update(input_params)
+                    result = await self._execute_http(definition, button=button, menu=menu, runtime=current_runtime, preview=preview)
+                elif kind == "workflow":
+                    raise RuntimeError("不支持嵌套工作流。")
+                else:
+                    raise RuntimeError(f"不支持的动作类型 '{kind}'。")
+
+                if not result or not result.success:
+                    raise RuntimeError(result.error if result else '未知错误')
+
+                if result.data and isinstance(result.data.get("variables"), dict):
+                    node_outputs[node_id] = result.data["variables"]
+                    global_variables.update(result.data["variables"])
+                else:
+                    node_outputs[node_id] = {}
+
+                # 最终结果以最后执行的节点为准
+                final_result = result
+                if result.new_text:
+                    final_text_parts.append(result.new_text)
+
+            except Exception as exc:
+                error_msg = f"工作流 ‘{workflow_id}’ 在节点 ‘{action_id}’ 遇到意外错误: {exc}"
+                self._logger.error(error_msg, exc_info=True)
+                return ActionExecutionResult(success=False, error=error_msg)
+
+        # 聚合所有节点的文本部分，但其他结果（如按钮、通知等）采用最后一个节点的结果
+        final_result.new_text = "\n".join(final_text_parts) if final_text_parts else None
+        final_result.should_edit_message = bool(final_result.new_text)
+        final_result.data = {"variables": global_variables}
+        final_result.success = True # 如果执行到这里，代表工作流成功
+
+        self._logger.info(f"工作流 ‘{workflow_id}’ 执行完毕。")
+        return final_result
+
+    async def _execute_local(
+        self,
+        plugin: "DynamicButtonFrameworkPlugin",
+        action: Dict[str, Any],
+        *,
+        button: Dict[str, Any],
+        menu: Dict[str, Any],
+        runtime: RuntimeContext,
+        preview: bool = False,
+    ) -> ActionExecutionResult:
+        action_name = action.get("config", {}).get("name")
+        if not action_name:
+            return ActionExecutionResult(success=False, error="本地动作配置缺少 name 字段")
+
+        registered_action = self._registry.get(action_name)
+        if not registered_action:
+            return ActionExecutionResult(success=False, error=f"未注册的本地动作: '{action_name}'")
+
+        if preview:
+            return ActionExecutionResult(success=True, new_text=f"此为本地动作 '{action_name}' 的预览。")
+
+        base_context = self._build_template_context(
+            action=action,
+            button=button,
+            menu=menu,
+            runtime=runtime,
+            variables=runtime.variables,
+        )
+
+        params = {}
+        param_config = action.get("config", {}).get("parameters", {})
+        try:
+            params = self._render_structure(param_config, base_context)
+            if not isinstance(params, dict):
+                return ActionExecutionResult(success=False, error="渲染后的动作参数必须是一个字典")
+        except Exception as exc:
+            return ActionExecutionResult(success=False, error=f"渲染本地动作参数失败: {exc}")
+
+        try:
+            import inspect
+            if inspect.iscoroutinefunction(registered_action.function):
+                result = await registered_action.function(plugin, runtime=runtime, **params)
+            else:
+                result = registered_action.function(plugin, runtime=runtime, **params)
+
+            if not isinstance(result, dict):
+                self._logger.warning(f"本地动作 '{action_name}' 的返回值不是一个字典，已忽略。")
+                result = {}
+
+            # 本地函数的返回值可以直接映射到执行结果。
+            return ActionExecutionResult(
+                success=True,
+                should_edit_message=bool(result.get("new_text")),
+                new_text=result.get("new_text"),
+                parse_mode=self._map_parse_mode(result.get("parse_mode", "html")),
+                next_menu_id=result.get("next_menu_id"),
+                button_overrides=result.get("button_overrides", []),
+                notification=result.get("notification"),
+                data={"variables": result.get("variables", {})} # 这是用于状态传递的关键字段
+            )
+        except Exception as exc:
+            self._logger.error(f"执行本地动作 '{action_name}' 失败: {exc}", exc_info=True)
+            return ActionExecutionResult(success=False, error=f"执行本地动作 '{action_name}' 时发生错误: {exc}")
 
     def _build_template_context(
         self,
@@ -138,7 +441,7 @@ class ActionExecutor:
                     "target": target,
                     "temporary": bool(entry.get("temporary", True)),
                 }
-                # template-based fields
+                # 模板字段
                 template_fields = {
                     "text": entry.get("text_template"),
                     "callback_data": entry.get("callback_template"),
@@ -151,11 +454,11 @@ class ActionExecutor:
                         result[field] = self._render_template(str(template_value), context)
                 if entry.get("web_app_url_template"):
                     result["web_app_url"] = self._render_template(str(entry["web_app_url_template"]), context)
-                # direct passthrough fields
+                # 直接传递的字段
                 for field in ("type", "action_id", "menu_id", "web_app_id"):
                     if field in entry and entry[field]:
                         result[field] = entry[field]
-                # allow static overrides if template not provided
+                # 如果未提供模板，则允许静态值覆盖
                 for field in ("text", "callback_data", "url"):
                     if field not in result and entry.get(field):
                         result[field] = entry[field]
@@ -175,13 +478,13 @@ class ActionExecutor:
                     if rendered_layout:
                         result["layout"] = rendered_layout
                 rendered.append({key: value for key, value in result.items() if value not in (None, "")})
-            except Exception as exc:  # pragma: no cover - defensive logging
+            except Exception as exc:  # 防御性日志记录
                 self._logger.error(f"渲染按钮覆盖配置失败: {exc}", exc_info=True)
         return rendered
 
     async def _get_http_client(self) -> httpx.AsyncClient:
         if not self._http_client:
-            self._http_client = httpx.AsyncClient(http2=False)
+            self._http_client = httpx.AsyncClient(http2=False, follow_redirects=True)
         return self._http_client
 
     async def _execute_http(
@@ -247,7 +550,7 @@ class ActionExecutor:
                     elif mode == "multipart":
                         rendered_body = self._render_structure(body_cfg.get("form", {}), base_context)
                         data_payload = rendered_body
-                    else:  # raw
+                    else:  # 原始文本
                         template_value = body_cfg.get("text") or body_cfg.get("raw") or ""
                         content_payload = self._render_template(str(template_value), base_context)
                         encoding = body_cfg.get("encoding", "utf-8")
@@ -331,7 +634,7 @@ class ActionExecutor:
                         combined_variables[name] = var_entry.get("value")
                     elif vtype == "runtime":
                         combined_variables[name] = runtime.variables.get(var_entry.get("key"))
-                except Exception as exc:  # pragma: no cover - defensive logging
+                except Exception as exc:  # 防御性日志记录
                     self._logger.error(f"解析变量 {name} 失败: {exc}", exc_info=True)
         render_context = self._build_template_context(
             action=action,

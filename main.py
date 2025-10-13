@@ -1,10 +1,11 @@
 """
-Main plugin file for the AstrBot Telegram Button Framework.
-This file contains the core plugin class, lifecycle management, and registers handlers
-which delegate the actual logic to other modules.
+AstrBot 动态按钮框架的核心插件文件。
+该文件定义了插件主类、管理插件的生命周期，并注册各类处理器，
+将具体逻辑委托给其他模块执行。
 """
 
 import asyncio
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -14,25 +15,78 @@ from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api.platform import AstrBotMessage, MessageMember, MessageType
 from astrbot.api.message_components import Plain
 from astrbot.core.platform.sources.telegram.tg_event import TelegramPlatformEvent
+from astrbot.core.utils.session_waiter import session_waiter, SessionController
 
-# --- Telegram-specific imports with fallback ---
+# --- Telegram 相关导入（带回退机制）---
 try:
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
     from telegram.ext import Application, CallbackQueryHandler, ExtBot
-except ImportError:  # pragma: no cover - optional dependency
+except ImportError:  # 可选依赖
     logger.error("Telegram 库未安装，请在 AstrBot 环境中执行 pip install python-telegram-bot")
     Application, CallbackQueryHandler, ExtBot, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo = (None,) * 6
 
-# --- Local module imports ---
+# --- 本地模块导入 ---
+from dataclasses import dataclass, field
+from typing import Any, Dict, Callable, List, Optional, Tuple
 
-# Import the command name for the decorator BEFORE the class is defined
+# 在类定义之前导入装饰器所需的命令名称
 from .config import MENU_COMMAND, PLUGIN_NAME, build_settings
 
-# Import logic handlers
+# 导入逻辑处理器
 from . import commands
 from . import handlers
+from . import local_actions
 from .actions import ActionExecutor
 from .storage import ButtonStore, ButtonsModel, ButtonDefinition, MenuDefinition, WebAppDefinition
+from .modular_actions import ModularActionRegistry
+
+
+@dataclass
+class RegisteredAction:
+    """表示一个由插件注册的自定义动作。"""
+    name: str
+    function: Callable
+    description: str
+    parameters: Dict[str, Any]
+
+
+class ActionRegistry:
+    """存储和管理基于代码的自定义动作。"""
+    def __init__(self, logger):
+        self._actions: Dict[str, RegisteredAction] = {}
+        self.logger = logger
+
+    def register(self, name: str, function: Callable, description: str, params: Dict) -> bool:
+        if name in self._actions:
+            self.logger.warning(f"本地动作 '{name}' 已存在，无法重复注册。")
+            return False
+        self._actions[name] = RegisteredAction(name, function, description, params)
+        self.logger.info(f"成功注册本地动作: '{name}'")
+        return True
+
+    def get(self, name: str) -> Optional[RegisteredAction]:
+        return self._actions.get(name)
+
+    def get_all(self) -> List[RegisteredAction]:
+        return list(self._actions.values())
+
+
+class TgButtonApi:
+    """供其他插件与 TG Button 插件交互的公共 API。"""
+    def __init__(self, registry: ActionRegistry):
+        self._registry = registry
+
+    def register_local_action(self, name: str, function: Callable, description: str, params: Dict):
+        """
+        允许其他插件注册自己的本地动作。
+        参数:
+            name: 动作的唯一名称。
+            function: 执行此动作的可调用函数。
+            description: 用户友好的描述。
+            params: 描述所需参数的字典（用于 UI 生成）。
+        """
+        self._registry.register(name, function, description, params)
+
 from .webui import WebUIServer
 
 BACK_BUTTON_TEXT = "返回"
@@ -51,51 +105,118 @@ def get_plugin_data_path() -> Path:
 class DynamicButtonFrameworkPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
-        # Build settings using the function from the config module
+        # 使用配置模块中的函数构建设置
         self.settings = build_settings(config)
         self.logger = logger
 
-        # Core plugin components
+        # 核心插件组件
         self.menu_command = self.settings["menu_command"]
         self.menu_header = self.settings["menu_header_text"]
         self.webui_enabled = self.settings["webui_enabled"]
         self.webui_exclusive = self.webui_enabled and self.settings["webui_exclusive"]
         self.button_store = ButtonStore(get_plugin_data_path(), logger=logger, default_header=self.menu_header)
-        self.action_executor = ActionExecutor(logger=logger)
+
+        # --- 用于本地动作和 API 的新组件 ---
+        self.action_registry = ActionRegistry(logger=logger)
+        self.modular_actions_dir = get_plugin_data_path() / "modular_actions"
+        self.modular_action_registry = ModularActionRegistry(logger=logger, actions_dir=self.modular_actions_dir)
+        self.api = TgButtonApi(self.action_registry)
+
+        self.action_executor = ActionExecutor(logger=logger, registry=self.action_registry, modular_registry=self.modular_action_registry)
         self.webui_server: Optional[WebUIServer] = None
 
-        # Telegram-specific state
+        # Telegram 特定状态
         self._callback_handler: Optional[CallbackQueryHandler] = None
         self._telegram_application: Optional[Any] = None
 
-        # Callback prefixes used by handlers
+        # 处理器使用的回调前缀
         self.CALLBACK_PREFIX_COMMAND = "tgbtn:cmd:"
         self.CALLBACK_PREFIX_MENU = "tgbtn:menu:"
         self.CALLBACK_PREFIX_BACK = "tgbtn:back:"
         self.CALLBACK_PREFIX_ACTION = "tgbtn:act:"
+        self.CALLBACK_PREFIX_WORKFLOW = "tgbtn:wf:"
 
         logger.info(
             f"Dynamic button plugin loaded; menu command '/{self.menu_command}', WebUI={'enabled' if self.webui_enabled else 'disabled'}."
         )
 
-        # Handle hot-reloading
+        # 处理热重载
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = asyncio.get_event_loop()
         loop.create_task(self._post_init_after_reload())
 
-    # --- Plugin Lifecycle Management ---
+    # --- 插件生命周期管理 ---
+
+    async def _migrate_and_load_actions(self):
+        """
+        将插件内置的 local_actions 同步到用户数据目录下的 modular_actions，并加载所有模块化动作。
+        此函数确保每次重载插件时，都会检查并更新预设动作文件。
+        """
+        source_dir = Path(__file__).parent / "local_actions"
+        target_dir = self.modular_actions_dir
+
+        if not source_dir.is_dir():
+            # 如果插件内没有 local_actions 目录，则无需同步，直接加载即可
+            await self.modular_action_registry.scan_and_load_actions()
+            return
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        synced_count = 0
+        updated_count = 0
+
+        # 同步逻辑：遍历源目录中的所有 .py 文件
+        for src_file in source_dir.glob("*.py"):
+            if src_file.name.startswith("__"):
+                continue  # 跳过 __init__.py 等特殊文件
+
+            target_file = target_dir / src_file.name
+            should_copy = False
+
+            if not target_file.exists():
+                # 如果目标文件不存在，直接复制
+                should_copy = True
+                synced_count += 1
+            else:
+                # 如果目标文件已存在，比较最后修改时间
+                src_mtime = src_file.stat().st_mtime
+                target_mtime = target_file.stat().st_mtime
+                if src_mtime > target_mtime:
+                    should_copy = True
+                    updated_count += 1
+
+            if should_copy:
+                try:
+                    content = src_file.read_text(encoding='utf-8')
+                    target_file.write_text(content, encoding='utf-8')
+                except Exception as e:
+                    self.logger.error(f"同步预设动作文件 {src_file.name} 失败: {e}")
+
+        if synced_count > 0:
+            self.logger.info(f"成功同步 {synced_count} 个新的预设动作文件。")
+        if updated_count > 0:
+            self.logger.info(f"成功更新 {updated_count} 个已有的预设动作文件。")
+
+        # 同步完成后，从目标目录加载所有模块化动作
+        await self.modular_action_registry.scan_and_load_actions()
+
+    async def _initialize_plugin_features(self):
+        """
+        统一的初始化函数，用于加载、迁移和注册插件的核心功能。
+        避免在 _on_astrbot_loaded 和 _post_init_after_reload 中出现重复代码。
+        """
+        await self._migrate_and_load_actions()
+        await self._ensure_webui()
+        await self._register_telegram_callbacks()
 
     @filter.on_astrbot_loaded()
     async def _on_astrbot_loaded(self):
-        await self._ensure_webui()
-        await self._register_telegram_callbacks()
+        await self._initialize_plugin_features()
 
     async def _post_init_after_reload(self):
         await asyncio.sleep(0.05)
-        await self._ensure_webui()
-        await self._register_telegram_callbacks()
+        await self._initialize_plugin_features()
 
     async def terminate(self):
         if self._callback_handler and self._telegram_application:
@@ -110,15 +231,18 @@ class DynamicButtonFrameworkPlugin(Star):
             self.webui_server = None
         await self.action_executor.close()
 
-    # --- Internal Setup ---
+    # --- 内部设置 ---
 
     async def _ensure_webui(self):
         if not self.webui_enabled or self.webui_server:
             return
         server = WebUIServer(
+            plugin=self,
             logger=logger,
             data_store=self.button_store,
             action_executor=self.action_executor,
+            action_registry=self.action_registry,
+            modular_action_registry=self.modular_action_registry,
             host=self.settings["webui_host"],
             port=self.settings["webui_port"],
             auth_token=self.settings["webui_auth_token"],
@@ -150,18 +274,18 @@ class DynamicButtonFrameworkPlugin(Star):
             logger.error("无法注册回调处理器：platform 对象没有 application 属性。")
             return
 
-        # The handler function is now a wrapper that calls the logic in handlers.py
+        # 处理器函数现在是一个包装器，它会调用 handlers.py 中的逻辑
         handler = CallbackQueryHandler(self._handle_callback_query)
         application.add_handler(handler, group=1)
         self._callback_handler = handler
         self._telegram_application = application
         logger.info("Telegram 动态按钮回调处理器已注册。")
 
-    # --- Event Handlers (Wrappers) ---
+    # --- 事件处理器（包装器） ---
 
-    def _handle_callback_query(self, update, _context):
-        """Wrapper to delegate callback query handling to the handlers module."""
-        handlers.async_handle_callback_query(self, update, _context)
+    async def _handle_callback_query(self, update, _context):
+        """将回调查询处理委托给 handlers 模块的包装器。"""
+        await handlers.handle_callback_query(self, update, _context)
 
     @filter.command(MENU_COMMAND)
     async def send_menu(self, event: AstrMessageEvent):
@@ -169,23 +293,9 @@ class DynamicButtonFrameworkPlugin(Star):
         async for result in commands.send_menu(self, event):
             yield result
 
-    @filter.command("bind", alias={"绑定"})
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    async def bind_button(self, event: AstrMessageEvent):
-        """绑定一个新的按钮"""
-        async for result in commands.bind_button(self, event):
-            yield result
-
-    @filter.command("unbind", alias={"解绑"})
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    async def unbind_button(self, event: AstrMessageEvent):
-        """解绑一个已有的按钮"""
-        async for result in commands.unbind_button(self, event):
-            yield result
-
-    # --- Internal Helper & Service Methods ---
-    # These methods remain in the main class because they are used by the
-    # external handlers and commands via the 'plugin' instance.
+    # --- 内部辅助与服务方法 ---
+    # 这些方法保留在主类中，因为外部的处理器和命令
+    # 会通过 'plugin' 实例来使用它们。
 
     async def _dispatch_command(self, query, command_text: str):
         platform = self.context.get_platform("telegram")
@@ -228,6 +338,81 @@ class DynamicButtonFrameworkPlugin(Star):
         fake_event.context = self.context
         fake_event.is_at_or_wake_command = True
         self.context.get_event_queue().put_nowait(fake_event)
+
+    async def start_search_session(self, runtime: Any, **kwargs) -> Dict[str, Any]:
+        prompt = kwargs.get("prompt", "请输入内容：")
+        timeout = int(kwargs.get("timeout", 60))
+        client = self._get_telegram_client()
+        if not client or not runtime.chat_id or not runtime.message_id:
+            return {"new_text": "执行失败：缺少上下文。"}
+
+        try:
+            await client.edit_message_text(
+                chat_id=runtime.chat_id,
+                message_id=runtime.message_id,
+                text=prompt,
+                reply_markup=None  # 等待输入时清除按钮
+            )
+        except Exception as e:
+            self.logger.error(f"编辑消息以提示输入时出错: {e}")
+            return {"new_text": f"执行失败: {e}"}
+
+        # --- 创建一个伪事件来启动会话 ---
+        platform = self.context.get_platform("telegram")
+        fake_message = AstrBotMessage()
+        fake_message.self_id = str(client.id)
+        if runtime.chat_type == "private":
+            fake_message.type = MessageType.FRIEND_MESSAGE
+            fake_message.session_id = runtime.chat_id
+        else:
+            fake_message.type = MessageType.GROUP_MESSAGE
+            session_id = f"{runtime.chat_id}#{runtime.thread_id}" if runtime.thread_id is not None else runtime.chat_id
+            fake_message.group_id = session_id
+            fake_message.session_id = session_id
+        fake_message.sender = MessageMember(user_id=runtime.user_id or "", nickname=runtime.full_name or runtime.username or "")
+        fake_message.message_str = "/fake_command_for_session"
+        fake_message.timestamp = int(time.time())
+
+        fake_event = TelegramPlatformEvent(
+            message_str=fake_message.message_str,
+            message_obj=fake_message,
+            platform_meta=platform.meta(),
+            session_id=fake_message.session_id,
+            client=client,
+        )
+        fake_event.context = self.context
+        # --- 会话等待器定义 ---
+
+        @session_waiter(timeout=timeout)
+        async def search_waiter(controller: SessionController, event: AstrMessageEvent):
+            user_input = event.message_str
+            await client.edit_message_text(
+                chat_id=runtime.chat_id,
+                message_id=runtime.message_id,
+                text=f"模拟搜索完成。\n您的输入是: '{user_input}'\n\n现在您可以手动恢复菜单。"
+            )
+            controller.stop()
+
+        try:
+            await search_waiter(fake_event)
+        except TimeoutError:
+            await client.edit_message_text(
+                chat_id=runtime.chat_id,
+                message_id=runtime.message_id,
+                text="输入超时，操作已取消。"
+            )
+        except Exception as e:
+            self.logger.error(f"会话执行期间出错: {e}", exc_info=True)
+            await client.edit_message_text(
+                chat_id=runtime.chat_id,
+                message_id=runtime.message_id,
+                text=f"会话处理失败: {e}"
+            )
+
+        # 这个本地动作本身不需要向执行器返回任何东西，
+        # 因为它自己处理所有用户交互。
+        return {}
+
 
     def _get_telegram_client(self) -> Optional[ExtBot]:
         platform = self.context.get_platform("telegram")
@@ -399,13 +584,13 @@ class DynamicButtonFrameworkPlugin(Star):
                 return None
             return InlineKeyboardButton(text, callback_data=f"{self.CALLBACK_PREFIX_MENU}{target}")
         if btn_type == 'action':
-            override_action = override.get('action_id')
-            if override_action:
-                button.payload = dict(button.payload)
-                button.payload['action_id'] = override_action
             if not button.payload.get('action_id'):
                 return None
             return InlineKeyboardButton(text, callback_data=f"{self.CALLBACK_PREFIX_ACTION}{button.id}")
+        if btn_type == 'workflow':
+            if not button.payload.get('workflow_id'):
+                return None
+            return InlineKeyboardButton(text, callback_data=f"{self.CALLBACK_PREFIX_WORKFLOW}{button.id}")
         if btn_type == 'inline_query':
             query_text = override.get('query') or button.payload.get('query', '')
             return InlineKeyboardButton(text, switch_inline_query_current_chat=query_text)

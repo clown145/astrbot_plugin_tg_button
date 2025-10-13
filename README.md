@@ -5,13 +5,23 @@
 
 _✨ 为 AstrBot 在 Telegram 中添加交互式按钮的插件，现已更新 WebUI 以方便管理。 ✨_
 
-[![Version](https://img.shields.io/badge/Version-1.1.2-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
+[![Version](https://img.shields.io/badge/Version-1.2.0-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
 [![AstrBot](https://img.shields.io/badge/AstrBot-v4.0%2B-orange.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![GitHub](https://img.shields.io/badge/作者-clown145-blue)](https://github.com/clown145)
 
 </div>
+
+## 主要更新 (V1.2.0) - 工作流与模块化动作
+
+此版本引入了强大的“工作流”引擎和“模块化动作”系统，将插件的可定制性和扩展性得到了提升。
+
+*   **✨ 新增“工作流 (Workflow)”引擎**: 引入了一个可视化的工作流设计器，允许用户通过拖拽方式将多个独立的动作（HTTP、本地、模块动作）编排成复杂的任务流。实现了动作之间的数据传递和逻辑分支，极大地增强了自动化能力。
+*   **🧩 新增“模块化动作 (Modular Action)”系统**: 允许开发者和高级用户通过在指定目录中创建简单的 Python 文件来添加自定义功能，无需修改插件核心代码。这为插件提供了前所未有的可扩展性。
+*   **📂 文档结构优化与内容补充**: 将所有说明文档从 `md/` 目录迁移至 `docs/` 目录，并为新的“工作流”和“模块化动作”功能撰写了详细的开发和使用指南。
+
+---
 
 ## 主要更新 (V1.1.2) - 安全修复
 
@@ -130,20 +140,19 @@ WebUI 拥有强大的功能，可以配置能够执行服务器端逻辑的“�
 
 我们为新功能准备了详细的指南文档，帮助你更好地使用本插件：
 
-*   **[📄 动作 (Action) 按钮使用指南](./md/action_buttons.md)**
-*   **[🌐 WebApp 按钮使用指南](./md/webapp_buttons.md)**
-*   **[🔗 Telegram `tg://` 协议链接大全](./md/tg_links.md)**
-*   **[⚙️ 按钮类型参考指南](./md/button_types.md)**
+*   **[✨ (新) 工作流 (Workflow) 功能详解](./docs/workflows.md)**
+*   **[🧩 (新) 如何创建模块化动作](./docs/modular_actions.md)**
+*   **[📄 动作 (Action) 按钮使用指南](./docs/action_buttons.md)**
+*   **[🌐 WebApp 按钮使用指南](./docs/webapp_buttons.md)**
+*   **[🔗 Telegram `tg://` 协议链接大全](./docs/tg_links.md)**
+*   **[⚙️ 按钮类型参考指南](./docs/button_types.md)**
 ---
 
 ## ⌨️ 关于旧版指令的说明
 
-旧版的 `/bind` 和 `/unbind` 指令在 `1.1.0` 版本中**很可能不可用**，它们的功能有限：
-*   仅能创建简单的**指令 (command)** 和**链接 (url)** 类型按钮。
-*   无法管理动作、子菜单、WebApp 等高级功能，也无法进行精细的布局调整。
-*   所有通过指令创建的按钮都会被添加到 `root` 菜单的末尾。
+旧版的 `/bind` 和 `/unbind` 指令已在 `1.2.0` 版本中被**完全移除**，以鼓励用户转向功能更强大、更安全的 WebUI。
 
-**结论：对于新功能和布局管理，请使用 WebUI。**
+所有按钮和菜单的管理现在都应通过 **WebUI** 完成。
 
 ---
 

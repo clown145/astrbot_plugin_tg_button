@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>登录 - TG Button WebUI</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    * {
+        box-sizing: border-box;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: var(--background-primary);
+      color: var(--text-primary);
+      margin: 0;
+    }
+    .login-container {
+      width: 320px;
+      padding: 24px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background-color: var(--background-secondary);
+      text-align: center;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    }
+    .login-container h1 {
+      margin-top: 0;
+      margin-bottom: 24px;
+    }
+    .login-container input {
+      width: 100%;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+    .login-container button {
+      width: 100%;
+    }
+    .error-message {
+      color: var(--danger-primary);
+      margin-top: 16px;
+      min-height: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <h1>WebUI 登录</h1>
+    <form id="loginForm">
+      <input type="password" id="tokenInput" placeholder="请输入访问密钥" required>
+      <button type="submit">登录</button>
+    </form>
+    <p id="errorMessage" class="error-message"></p>
+  </div>
+  <script src="/static/login.js"></script>
+</body>
+</html>

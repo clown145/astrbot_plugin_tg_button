@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <title>TG Button WebUI</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/drawflow.min.css">
 </head>
 <body>
   <header>
@@ -15,14 +16,14 @@
       <button id="refreshBtn">刷新</button>
       <button id="saveBtn">保存全部</button>
       <button id="exportBtn" class="secondary">导出 JSON</button>
-      <span class="muted" style="margin-left: auto;">如需鉴权，可在 URL 上携带 <code>?token=YOUR_TOKEN</code>。</span>
-    </div>
+          </div>
 
     <div class="tab-nav">
         <div id="tabIndicator"></div>
         <button class="tab-link active" data-tab="tab-layout">菜单与布局</button>
         <button class="tab-link" data-tab="tab-actions">动作 (Actions)</button>
         <button class="tab-link" data-tab="tab-webapps">WebApp</button>
+        <button class="tab-link" data-tab="tab-workflow">工作流 (Workflow)</button>
     </div>
 
     <div id="tab-layout" class="tab-content active">
@@ -60,9 +61,33 @@
           <div id="webappsContainer"></div>
         </section>
     </div>
+
+    <div id="tab-workflow" class="tab-content">
+      <section id="workflowSection">
+        <h2>工作流编辑器<span><button id="newWorkflowBtn">新建</button><select id="workflowSelector" class="secondary" style="margin-left: 8px; width: 150px;"></select><button id="saveWorkflowBtn" class="secondary" style="margin-left: 8px;">保存当前工作流</button><button id="deleteWorkflowBtn" class="danger" style="margin-left: 8px;">删除</button></span></h2>
+        <div class="workflow-meta-editor">
+          <div class="field">
+              <label for="workflowNameInput">工作流名称</label>
+              <input type="text" id="workflowNameInput" placeholder="为此工作流输入一个清晰的名称">
+          </div>
+          <div class="field">
+              <label for="workflowDescriptionInput">描述</label>
+              <textarea id="workflowDescriptionInput" rows="2" placeholder="（可选）简要说明此工作流的作用。"></textarea>
+          </div>
+        </div>
+        <div style="display: flex; gap: 16px; margin-top: 16px;">
+          <div id="node-palette" style="width: 240px; border: 1px solid var(--border-color); padding: 10px; height: 600px; overflow-y: auto;">
+            <h4>可用节点</h4>
+            <p class="muted" style="font-size: 0.8em;">从这里拖拽节点到右侧画布。</p>
+            <!-- 节点列表将在此处注入 -->
+          </div>
+          <div id="drawflow" style="height: 600px; flex-grow: 1; border: 1px solid #ccc; position: relative;"></div>
+        </div>
+      </section>
+    </div>
   </main>
 
-  <!-- Modal Structure -->
+  <!-- 模态框结构 -->
   <div id="modal" class="modal-overlay">
     <div class="modal-container">
       <div class="modal-header">
@@ -70,26 +95,18 @@
         <button id="modalCloseBtn" class="close-btn">&times;</button>
       </div>
       <div id="modalBody" class="modal-body">
-        <!-- Modal content will be injected here -->
+        <!-- 模态框内容将在此处注入 -->
       </div>
       <div id="modalFooter" class="modal-footer">
-        <!-- Modal buttons will be injected here -->
+        <!-- 模态框按钮将在此处注入 -->
       </div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
   <script src="/static/main.js"></script>
+  <script src="/static/drawflow.min.js"></script>
+  <script src="/static/editor.js"></script>
 
-  <!-- SVG Filter for Gooey Effect -->
-  <svg style="position:absolute; width:0; height:0;">
-    <defs>
-      <filter id="gooey">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur" />
-        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="goo" />
-        <feBlend in="SourceGraphic" in2="goo" />
-      </filter>
-    </defs>
-  </svg>
 </body>
 </html>

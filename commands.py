@@ -1,16 +1,16 @@
 """
-Command handling logic for the tg_button plugin.
+tg_button 插件的命令处理逻辑。
 """
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from astrbot.api.event import AstrMessageEvent, filter
 
-# Guard for circular import for type hinting
+# 类型提示的循环导入保护
 if TYPE_CHECKING:
     from .main import DynamicButtonFrameworkPlugin
 
-# Imports from telegram, which might be None
+# 从 telegram 导入，可能为 None
 try:
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 except ImportError:
@@ -18,7 +18,7 @@ except ImportError:
 
 
 async def send_menu(plugin: "DynamicButtonFrameworkPlugin", event: AstrMessageEvent):
-    """Logic for displaying the interactive button menu."""
+    """显示交互式按钮菜单的逻辑。"""
     if plugin.webui_exclusive:
         yield event.plain_result("WebUI 独占模式已启用，请通过 WebUI 操作按钮。")
         return
@@ -61,65 +61,3 @@ async def send_menu(plugin: "DynamicButtonFrameworkPlugin", event: AstrMessageEv
         return
     event.stop_event()
 
-
-async def bind_button(plugin: "DynamicButtonFrameworkPlugin", event: AstrMessageEvent):
-    """Logic for binding a new button via command."""
-    if plugin.webui_exclusive:
-        yield event.plain_result("WebUI 独占模式已启用，请在 WebUI 中管理按钮。")
-        return
-
-    args = event.message_str.strip().split()
-    if len(args) < 4:
-        yield event.plain_result("格式错误！\n示例: /bind 搜索 指令 search something")
-        return
-
-    _, *actual = args
-    type_keywords_map = {
-        "指令": "command",
-        "command": "command",
-        "网址": "url",
-        "url": "url",
-        "web": "web_app",
-        "webapp": "web_app",
-    }
-    btn_type = None
-    type_index = -1
-    for idx, part in enumerate(actual):
-        key = part.lower()
-        if key in type_keywords_map and idx > 0 and idx < len(actual) - 1:
-            btn_type = type_keywords_map[key]
-            type_index = idx
-            break
-
-    if not btn_type:
-        yield event.plain_result("格式错误！类型必须是 指令/command 或 网址/url 或 web。")
-        return
-
-    text = " ".join(actual[:type_index])
-    value = " ".join(actual[type_index + 1 :])
-
-    if not text or not value:
-        yield event.plain_result("格式错误！请提供按钮文字与绑定内容。")
-        return
-
-    await plugin.button_store.upsert_simple_button(text, btn_type, value)
-    yield event.plain_result(f"按钮 '{text}' 已成功绑定为 {btn_type}。")
-
-
-async def unbind_button(plugin: "DynamicButtonFrameworkPlugin", event: AstrMessageEvent):
-    """Logic for unbinding a button via command."""
-    if plugin.webui_exclusive:
-        yield event.plain_result("WebUI 独占模式已启用，请在 WebUI 中管理按钮。")
-        return
-
-    args = event.message_str.strip().split()
-    if len(args) < 2:
-        yield event.plain_result("请输入要解绑的按钮文本。")
-        return
-
-    text = " ".join(args[1:])
-    removed = await plugin.button_store.remove_button_by_text(text)
-    if removed:
-        yield event.plain_result(f"按钮 '{text}' 已成功解绑。")
-    else:
-        yield event.plain_result(f"未找到名为 '{text}' 的按钮。")

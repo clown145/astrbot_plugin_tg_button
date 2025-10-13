@@ -1,5 +1,5 @@
 """
-Configuration loading and management for the astra_plugin_tg_button.
+astrbot_plugin_tg_button 插件的配置加载与管理。
 """
 import json
 from pathlib import Path
@@ -21,7 +21,7 @@ CONFIG_DEFAULTS: Dict[str, Any] = {
 }
 
 def _load_raw_config() -> Dict[str, Any]:
-    """Loads the raw config file from disk."""
+    """从磁盘加载原始配置文件。"""
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8-sig") as fp:
             return json.load(fp)
@@ -33,7 +33,7 @@ def _load_raw_config() -> Dict[str, Any]:
 
 
 def _ensure_string(value: Any, default: str) -> str:
-    """Coerces a value to a string."""
+    """将值强制转换为字符串。"""
     if isinstance(value, str):
         return value
     if value is None:
@@ -42,7 +42,7 @@ def _ensure_string(value: Any, default: str) -> str:
 
 
 def _coerce_bool(value: Any, default: bool) -> bool:
-    """Coerces a value to a boolean."""
+    """将值强制转换为布尔值。"""
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
@@ -57,7 +57,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
 
 
 def _coerce_int(value: Any, default: int) -> int:
-    """Coerces a value to an integer."""
+    """将值强制转换为整数。"""
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -65,7 +65,7 @@ def _coerce_int(value: Any, default: int) -> int:
 
 
 def build_settings(raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Builds the final settings dictionary from raw config and defaults."""
+    """根据原始配置和默认值构建最终的设置字典。"""
     settings = dict(CONFIG_DEFAULTS)
     if raw:
         settings.update(raw)
@@ -79,8 +79,8 @@ def build_settings(raw: Dict[str, Any]) -> Dict[str, Any]:
     settings["webui_auth_token"] = _ensure_string(settings.get("webui_auth_token"), CONFIG_DEFAULTS["webui_auth_token"])
     return settings
 
-# Load initial settings at module import time to make MENU_COMMAND available for decorators.
-# This part is executed only once when the module is first imported.
+# 在模块导入时加载初始设置，以便装饰器可以使用 MENU_COMMAND。
+# 这部分代码仅在模块首次导入时执行一次。
 raw_config = _load_raw_config()
 INITIAL_SETTINGS = build_settings(raw_config)
 MENU_COMMAND = INITIAL_SETTINGS["menu_command"]

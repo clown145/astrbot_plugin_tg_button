@@ -12,6 +12,7 @@ def _generate_id(prefix: str) -> str:
 
 @dataclass
 class LayoutConfig:
+    """按钮在网格布局中的位置和尺寸信息。"""
     row: int = 0
     col: int = 0
     rowspan: int = 1
@@ -34,11 +35,12 @@ class LayoutConfig:
 
 @dataclass
 class WebAppDefinition:
+    """定义一个可在按钮中使用的 WebApp。"""
     id: str
     name: str
-    kind: str = "external"  # external | internal
+    kind: str = "external"  # 类型: external(外部) | internal(内部)
     url: str = ""
-    source: str = ""  # used when kind == internal
+    source: str = ""  # 当 kind 为 'internal' 时使用
     description: str = ""
     options: Dict[str, Any] = field(default_factory=dict)
 
@@ -90,6 +92,7 @@ class WebAppDefinition:
 
 @dataclass
 class ButtonDefinition:
+    """定义一个具体的按钮，包括其文本、类型、负载和布局。"""
     id: str
     text: str
     type: str
@@ -136,6 +139,7 @@ class ButtonDefinition:
 
 @dataclass
 class MenuDefinition:
+    """定义一个菜单，它包含一组按钮项和可选的标题。"""
     id: str
     name: str
     header: str = ""
@@ -172,6 +176,7 @@ class MenuDefinition:
 
 @dataclass
 class ActionDefinition:
+    """定义一个可执行的动作，如 HTTP 请求或本地函数调用。"""
     id: str
     name: str
     kind: str
@@ -211,12 +216,100 @@ class ActionDefinition:
 
 
 @dataclass
+class WorkflowNodePosition:
+    """工作流中节点的可视化位置。"""
+    x: float = 0.0
+    y: float = 0.0
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowNodePosition":
+        return cls(x=data.get("x", 0.0), y=data.get("y", 0.0))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class WorkflowNode:
+    """工作流中的一个节点，代表一个要执行的动作。"""
+    id: str
+    action_id: str
+    position: WorkflowNodePosition
+    data: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowNode":
+        return cls(
+            id=data["id"],
+            action_id=data.get("action_id", ""),
+            position=WorkflowNodePosition.from_dict(data.get("position", {})),
+            data=data.get("data", {}),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = asdict(self)
+        d["position"] = self.position.to_dict()
+        return d
+
+
+@dataclass
+class WorkflowEdge:
+    """工作流中的一条边，连接两个节点的输入和输出。"""
+    id: str
+    source_node: str
+    source_output: str
+    target_node: str
+    target_input: str
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowEdge":
+        return cls(**data)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class WorkflowDefinition:
+    """定义一个完整的工作流，包含节点（动作）和边（数据流）。"""
+    id: str
+    name: str
+    description: str = ""
+    nodes: Dict[str, WorkflowNode] = field(default_factory=dict)
+    edges: List[WorkflowEdge] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowDefinition":
+        return cls(
+            id=data["id"],
+            name=data.get("name", data["id"]),
+            description=data.get("description", ""),
+            nodes={
+                node_id: WorkflowNode.from_dict(node_data)
+                for node_id, node_data in (data.get("nodes", {}) or {}).items()
+            },
+            edges=[WorkflowEdge.from_dict(edge_data) for edge_data in data.get("edges", [])],
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "nodes": {nid: node.to_dict() for nid, node in self.nodes.items()},
+            "edges": [edge.to_dict() for edge in self.edges],
+        }
+
+
+@dataclass
 class ButtonsModel:
+    """插件所有持久化数据的顶层容器。"""
     version: int = 2
     menus: Dict[str, MenuDefinition] = field(default_factory=dict)
     buttons: Dict[str, ButtonDefinition] = field(default_factory=dict)
     actions: Dict[str, ActionDefinition] = field(default_factory=dict)
     web_apps: Dict[str, WebAppDefinition] = field(default_factory=dict)
+    workflows: Dict[str, WorkflowDefinition] = field(default_factory=dict)
 
     def ensure_menu(self, menu: MenuDefinition) -> None:
         if menu.id not in self.menus:
@@ -229,6 +322,7 @@ class ButtonsModel:
             "buttons": {btn_id: btn.to_dict() for btn_id, btn in self.buttons.items()},
             "actions": {act_id: act.to_dict() for act_id, act in self.actions.items()},
             "web_apps": {webapp_id: webapp.to_dict() for webapp_id, webapp in self.web_apps.items()},
+            "workflows": {workflow_id: workflow.to_dict() for workflow_id, workflow in self.workflows.items()},
         }
 
     @classmethod
@@ -238,17 +332,30 @@ class ButtonsModel:
         buttons_source: Dict[str, Any] = data.get("buttons", {}) or {}
         actions_source: Dict[str, Any] = data.get("actions", {}) or {}
         web_apps_source: Dict[str, Any] = data.get("web_apps", {}) or {}
+        workflows_source: Dict[str, Any] = data.get("workflows", {}) or {}
         menus = {menu_id: MenuDefinition.from_dict(menu_dict) for menu_id, menu_dict in menus_source.items()}
         buttons = {btn_id: ButtonDefinition.from_dict(btn_dict) for btn_id, btn_dict in buttons_source.items()}
         actions = {act_id: ActionDefinition.from_dict(act_dict) for act_id, act_dict in actions_source.items()}
         web_apps = {webapp_id: WebAppDefinition.from_dict(webapp_dict) for webapp_id, webapp_dict in web_apps_source.items()}
-        return cls(version=version, menus=menus, buttons=buttons, actions=actions, web_apps=web_apps)
+        workflows = {
+            workflow_id: WorkflowDefinition.from_dict(workflow_dict)
+            for workflow_id, workflow_dict in workflows_source.items()
+        }
+        return cls(
+            version=version,
+            menus=menus,
+            buttons=buttons,
+            actions=actions,
+            web_apps=web_apps,
+            workflows=workflows,
+        )
 
     def clone(self) -> "ButtonsModel":
         return ButtonsModel.from_dict(self.to_dict())
 
 
 class ButtonStore:
+    """负责管理插件数据的持久化，处理文件的加载、保存和迁移。"""
     def __init__(self, data_dir: Path, *, logger, default_header: str = "请选择功能"):
         self.data_dir = data_dir
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -259,7 +366,7 @@ class ButtonStore:
         self._lock = asyncio.Lock()
         self._model = self._load()
         self._ensure_defaults()
-        self._save()  # ensure file exists on startup
+        self._save()  # 确保启动时文件存在
 
     @property
     def model(self) -> ButtonsModel:
@@ -271,7 +378,7 @@ class ButtonStore:
                 with open(self._file_path, "r", encoding="utf-8") as fp:
                     data = json.load(fp)
                 return ButtonsModel.from_dict(data)
-            except Exception as exc:  # pragma: no cover - defensive logging
+            except Exception as exc:  # 防御性日志记录
                 self._logger.error(f"加载 {self._file_path} 失败，将重新初始化: {exc}")
         legacy_model = self._load_legacy()
         if legacy_model:
@@ -338,7 +445,7 @@ class ButtonStore:
         try:
             with open(self._file_path, "w", encoding="utf-8") as fp:
                 json.dump(self._model.to_dict(), fp, ensure_ascii=False, indent=2)
-        except Exception as exc:  # pragma: no cover - defensive logging
+        except Exception as exc:  # 防御性日志记录
             self._logger.error(f"保存按钮配置失败: {exc}")
 
     async def get_snapshot(self) -> ButtonsModel:

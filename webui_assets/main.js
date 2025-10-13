@@ -1,8 +1,16 @@
 (function() {
-    // --- Globals & DOM Elements ---
-    const token = new URLSearchParams(location.search).get('token');
+    // --- 全局变量与 DOM 元素 ---
+    const token = localStorage.getItem('tg-button-auth-token');
+
+    // --- 身份认证网关 ---
+    if (!token) {
+        window.location.href = '/login';
+        return; // 停止脚本的进一步执行。
+    }
     const headers = token ? { 'X-Auth-Token': token } : {};
     let state = { version: 2, menus: {}, buttons: {}, actions: {}, web_apps: {} };
+    let modularActions = [];
+    let localActions = [];
     let isClick = true;
 
     const menusContainer = document.getElementById('menusContainer');
@@ -17,7 +25,7 @@
     const addWebappBtn = document.getElementById('addWebappBtn');
     const exportBtn = document.getElementById('exportBtn');
 
-    // --- Modal ---
+    // --- 模态框 ---
     const modal = document.getElementById('modal');
     const modalTitle = document.getElementById('modalTitle');
     const modalBody = document.getElementById('modalBody');
@@ -36,6 +44,10 @@
     }
     modalCloseBtn.onclick = closeModal;
     modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+
+    // --- 全局暴露模态框函数 ---
+    window.showInfoModal = showInfoModal;
+    window.showConfirmModal = showConfirmModal;
 
     function showInfoModal(message, isError = false) {
         const body = document.createElement('p');
@@ -76,14 +88,20 @@
         openModal(title, body, footer);
     }
 
-    // --- API & State Management ---
+    // --- API 和状态管理 ---
     async function api(path, opts = {}) {
         const options = { headers: { 'Content-Type': 'application/json', ...headers }, ...opts };
         if (options.body && typeof options.body !== 'string') {
             options.body = JSON.stringify(options.body);
         }
-        const response = await fetch(path + (token ? (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : ''), options);
+        const response = await fetch(path, options);
         if (!response.ok) {
+            if (response.status === 401) {
+                // 未授权，可能是令牌过期或无效
+                localStorage.removeItem('tg-button-auth-token');
+                window.location.href = '/login';
+                throw new Error('认证失败，请重新登录。');
+            }
             const body = await response.text();
             throw new Error(`API Error: ${response.status} ${body}`);
         }
@@ -91,8 +109,23 @@
         return contentType.includes('application/json') ? response.json() : response.text();
     }
     async function loadState() {
-        const data = await api('/api/state');
-        state = { version: 2, menus: {}, buttons: {}, actions: {}, web_apps: {}, ...data };
+        const [stateData, modularActionsData, localActionsData] = await Promise.all([
+            api('/api/state'),
+            api('/api/actions/modular/available').catch(err => {
+                console.error("获取模块化动作失败:", err);
+                showInfoModal("加载模块化动作列表失败，部分功能可能无法使用。", true);
+                return { actions: [] };
+            }),
+            api('/api/actions/local/available').catch(err => {
+                console.error("获取本地动作失败:", err);
+                showInfoModal("加载本地动作列表失败，部分功能可能无法使用。", true);
+                return { actions: [] };
+            })
+        ]);
+
+        state = { version: 2, menus: {}, buttons: {}, actions: {}, web_apps: {}, ...stateData };
+        modularActions = modularActionsData.actions || [];
+        localActions = localActionsData.actions || [];
         renderAll();
     }
     function renderAll(opts = {}) {
@@ -105,11 +138,53 @@
                 if(details.dataset.id) openDetails.add(details.dataset.id);
             });
         }
-        
+
         renderMenus(openDetails);
         renderUnassignedButtons();
         renderActions(openDetails, opts.openNewId && opts.type === 'action' ? opts.openNewId : null);
         renderWebapps(openDetails, opts.openNewId && opts.type === 'webapp' ? opts.openNewId : null);
+
+                // 同时刷新工作流编辑器，确保其始终同步。
+        if (window.tgButtonEditor) {
+            const allActions = {};
+
+            // 1. 内置动作 (来自 state)
+            for (const actionId in state.actions) {
+                allActions[actionId] = {
+                    ...state.actions[actionId], // 复制原始属性
+                    id: actionId, // 确保 id 属性存在
+                    name: state.actions[actionId].name || actionId,
+                    description: state.actions[actionId].description || ''
+                };
+            }
+
+            // 2. 本地动作
+            (localActions || []).forEach(localAction => {
+                const actionId = localAction.name; // ID 即为其名称
+                allActions[actionId] = {
+                    name: `[本地] ${localAction.name}`,
+                    description: localAction.description,
+                    parameters: localAction.parameters,
+                    id: actionId, // 添加关键的 id 属性
+                    isLocal: true
+                };
+            });
+
+            // 3. 模块化动作
+            (modularActions || []).forEach(modAction => {
+                allActions[modAction.id] = {
+                    name: `[新] ${modAction.name}`,
+                    description: modAction.description,
+                    inputs: modAction.inputs,
+                    outputs: modAction.outputs,
+                    id: modAction.id, // 这里 id 本就是正确的
+                    isModular: true
+                };
+            });
+
+            window.tgButtonEditor.refreshPalette(allActions);
+            window.tgButtonEditor.refreshWorkflows();
+        }
 
         if (opts.openNewId) {
             setTimeout(() => {
@@ -122,7 +197,7 @@
         }
     }
 
-    // --- RENDER FUNCTIONS ---
+    // --- 渲染函数 ---
     function renderMenus(openDetails) {
         menusContainer.innerHTML = '';
         if (!Object.keys(state.menus).length) {
@@ -136,11 +211,11 @@
             const summaryText = `${menuId} (${menu.name || '未命名'})`;
             details.innerHTML = `<summary>${summaryText}</summary>`;
             if (openDetails.has(menuId)) details.open = true;
-            
+
             const content = document.createElement('div');
             content.className = 'details-content';
             const nameField = createField('名称', createInput('text', menu.name || '', val => { menu.name = val; details.querySelector('summary').textContent = `${menuId} (${val || '未命名'})`; }));
-            const headerField = createField('标题', createInput('text', menu.header || '', val => { menu.header = val; }));
+            const headerField = createField('标题', createTextarea(menu.header || '', val => { menu.header = val; }));
             const layoutGrid = document.createElement('div');
             layoutGrid.className = 'menu-layout-grid';
             layoutGrid.dataset.menuId = menuId;
@@ -156,7 +231,7 @@
                 layoutGrid.appendChild(createMenuRow(rows.get(i) || [], menuId, i));
             }
             layoutGrid.appendChild(createMenuRow([], menuId, maxRow + 1));
-            
+
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'danger';
             deleteBtn.style.marginTop = '16px';
@@ -181,15 +256,15 @@
         Object.values(state.menus).forEach(menu => {
             (menu.items || []).forEach(btnId => allButtonIds.delete(btnId));
         });
-        
+
         allButtonIds.forEach(btnId => {
             const button = state.buttons[btnId];
             if (button) unassignedButtonsContainer.appendChild(createMenuButton(button));
         });
-        
+
         initSortableForRow(unassignedButtonsContainer);
     }
-    
+
     function createMenuRow(buttonsInRow, menuId, rowIndex) {
         const rowDiv = document.createElement('div');
         rowDiv.className = 'menu-layout-row';
@@ -224,7 +299,7 @@
         const grid = document.querySelector(`.menu-layout-grid[data-menu-id="${menuId}"]`);
         grid.querySelectorAll('.menu-layout-row').forEach(initSortableForRow);
     }
-    
+
     function updateRowAppearance(row) {
         if (!row) return;
         const hasButtons = row.querySelector('.menu-btn-wrapper') !== null;
@@ -238,11 +313,23 @@
             ghostClass: 'sortable-ghost',
             dragClass: 'sortable-drag',
             onEnd: (evt) => {
-                updateStateFromDOM();
-                
+                // 重构核心：不再全局扫描 DOM，而是精确更新受影响的菜单状态
+                const fromMenuId = evt.from.closest('.menu-layout-grid')?.dataset.menuId;
+                const toMenuId = evt.to.closest('.menu-layout-grid')?.dataset.menuId;
+
+                // 更新来源和目标菜单的状态。如果拖拽到“未分配区域”，toMenuId 会是 null。
+                if (fromMenuId) {
+                    updateMenuStateFromDOM(fromMenuId);
+                }
+                if (toMenuId && toMenuId !== fromMenuId) {
+                    updateMenuStateFromDOM(toMenuId);
+                }
+
+                // 更新行外观（空/非空）
                 updateRowAppearance(evt.from);
                 updateRowAppearance(evt.to);
 
+                // 如果按钮被拖到菜单的最后一个空行，则自动添加一个新行
                 const grid = evt.to.closest('.menu-layout-grid');
                 if (grid) {
                     const rows = grid.querySelectorAll('.menu-layout-row');
@@ -257,83 +344,115 @@
         });
     }
 
-    function updateStateFromDOM() {
-        Object.keys(state.menus).forEach(menuId => {
-            state.menus[menuId].items = [];
-        });
+    /**
+     * @description 根据 DOM 结构更新指定菜单的 state。
+     * 这是对旧的全局 updateStateFromDOM 的优化，只处理单个菜单，提高效率和健壮性。
+     * @param {string} menuId - 需要更新状态的菜单 ID。
+     */
+    function updateMenuStateFromDOM(menuId) {
+        const grid = document.querySelector(`.menu-layout-grid[data-menu-id="${menuId}"]`);
+        if (!grid || !state.menus[menuId]) return;
 
-        document.querySelectorAll('.menu-layout-grid').forEach(grid => {
-            const menuId = grid.dataset.menuId;
-            if (!menuId || !state.menus[menuId]) return;
-
-            const newButtonOrder = [];
-            grid.querySelectorAll('.menu-layout-row').forEach((rowEl, rowIndex) => {
-                rowEl.querySelectorAll('.menu-btn-wrapper').forEach((btnEl, colIndex) => {
-                    const btnId = btnEl.dataset.buttonId;
-                    const button = state.buttons[btnId];
-                    if (button) {
-                        button.layout.row = rowIndex;
-                        button.layout.col = colIndex;
-                        newButtonOrder.push(btnId);
-                    }
-                });
+        const newButtonOrder = [];
+        grid.querySelectorAll('.menu-layout-row').forEach((rowEl, rowIndex) => {
+            rowEl.querySelectorAll('.menu-btn-wrapper').forEach((btnEl, colIndex) => {
+                const btnId = btnEl.dataset.buttonId;
+                const button = state.buttons[btnId];
+                if (button) {
+                    button.layout.row = rowIndex;
+                    button.layout.col = colIndex;
+                    newButtonOrder.push(btnId);
+                }
             });
-            state.menus[menuId].items = newButtonOrder;
         });
+        state.menus[menuId].items = newButtonOrder;
     }
-    
-    function renderActions(openDetails, openNewId) {
-        actionsContainer.innerHTML = '';
-        if (!Object.keys(state.actions).length) {
-            actionsContainer.innerHTML = '<p class="muted">暂无动作。</p>'; return;
+
+    /**
+     * @description 通用的列表项渲染函数，用于渲染 Actions 和 WebApps 列表，减少代码重复。
+     * @param {HTMLElement} container - 渲染内容的父容器。
+     * @param {object} items - 要渲染的数据对象 (e.g., state.actions)。
+     * @param {string} type - 渲染的类型 ('action' or 'webapp')。
+     * @param {string} singularName - 类型的单数中文名 (e.g., '动作')。
+     * @param {Set<string>} openDetails - 需要默认展开的项的 ID 集合。
+     * @param {string|null} openNewId - 如果有新创建的项，其 ID。
+     */
+    function renderDetailsList(container, items, type, singularName, openDetails, openNewId) {
+        container.innerHTML = '';
+        if (!items || !Object.keys(items).length) {
+            container.innerHTML = `<p class="muted">暂无${singularName}。</p>`;
+            return;
         }
-        Object.keys(state.actions).forEach(id => {
-            const action = state.actions[id];
+        const sortedKeys = Object.keys(items).sort((a, b) => (items[a].name || a).localeCompare(items[b].name || b));
+        sortedKeys.forEach(id => {
+            const item = items[id];
             const details = document.createElement('details');
             details.dataset.id = id;
-            const summaryText = `${id} (${action.name || '未命名'})`;
+            const summaryText = `${id} (${item.name || '未命名'})`;
             details.innerHTML = `<summary>${summaryText}</summary>`;
             if (openDetails.has(id) || id === openNewId) details.open = true;
-            const content = createActionWebAppContent('action', id, action);
+            const content = createActionWebAppContent(type, id, item);
             details.appendChild(content);
-            actionsContainer.appendChild(details);
+            container.appendChild(details);
         });
+    }
+
+    function renderActions(openDetails, openNewId) {
+        renderDetailsList(actionsContainer, state.actions, 'action', '动作', openDetails, openNewId);
     }
 
     function renderWebapps(openDetails, openNewId) {
-        webappsContainer.innerHTML = '';
-        if (!Object.keys(state.web_apps || {}).length) {
-            webappsContainer.innerHTML = '<p class="muted">暂无 WebApp。</p>'; return;
-        }
-        Object.keys(state.web_apps).forEach(id => {
-            const webapp = state.web_apps[id];
-            const details = document.createElement('details');
-            details.dataset.id = id;
-            const summaryText = `${id} (${webapp.name || '未命名'})`;
-            details.innerHTML = `<summary>${summaryText}</summary>`;
-            if (openDetails.has(id) || id === openNewId) details.open = true;
-            const content = createActionWebAppContent('webapp', id, webapp);
-            details.appendChild(content);
-            webappsContainer.appendChild(details);
-        });
+        renderDetailsList(webappsContainer, state.web_apps, 'webapp', 'WebApp', openDetails, openNewId);
     }
 
     function createActionWebAppContent(type, id, item) {
         const content = document.createElement('div');
         content.className = 'details-content';
         const nameField = createField('名称', createInput('text', item.name || '', val => { item.name = val; document.querySelector(`details[data-id='${id}'] summary`).textContent = `${id} (${val || '未命名'})`; }));
-        const descField = createField('描述', createInput('text', item.description || '', val => { item.description = val; }));
+        const descField = createField('描述', createTextarea(item.description || '', val => { item.description = val; }));
         content.append(nameField, descField);
 
         if (type === 'action') {
-            const configInput = createTextarea(JSON.stringify(item.config || {}, null, 2), val => { try { item.config = JSON.parse(val); configInput.style.borderColor = 'var(--border-color)'; } catch { configInput.style.borderColor = 'var(--danger-primary)'; }});
-            configInput.dataset.actionId = id;
-            content.appendChild(createField('配置 (JSON)', configInput));
-        } else {
+            const configContainer = document.createElement('div');
+
+            const renderActionConfig = (container) => {
+                container.innerHTML = ''; // 清空旧的配置
+                const currentKind = item.kind || 'http';
+
+                // http 或 local 类型
+                const configInput = createTextarea(JSON.stringify(item.config || {}, null, 2), val => {
+                    try {
+                        item.config = JSON.parse(val);
+                        configInput.style.borderColor = 'var(--border-color)';
+                    } catch {
+                        configInput.style.borderColor = 'var(--danger-primary)';
+                    }
+                });
+                configInput.classList.add('json-config-input');
+                container.appendChild(createField('配置 (JSON)', configInput));
+            };
+
+            const kindSelect = createSelect(item.kind || 'http',
+                [
+                    { value: 'http', label: 'HTTP 请求' },
+                    { value: 'local', label: '本地动作' }
+                ],
+                val => {
+                    item.kind = val;
+                    item.config = {};
+                    renderActionConfig(configContainer);
+                }
+            );
+            content.appendChild(createField('动作类型', kindSelect));
+            content.appendChild(configContainer);
+
+            renderActionConfig(configContainer); // 初始渲染
+
+        } else { // webapp 类型处理
             const urlField = createField('URL', createInput('text', item.url || '', val => { item.url = val; }));
             content.appendChild(urlField);
         }
-        
+
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'danger';
         deleteBtn.style.marginTop = '16px';
@@ -356,7 +475,7 @@
 
         const body = document.createElement('div');
         const textField = createField('显示文本', createInput('text', button.text, v => button.text = v));
-        const typeSelect = createSelect(button.type, [ { value: 'command', label: '指令' }, { value: 'url', label: '链接' }, { value: 'submenu', label: '子菜单' }, { value: 'web_app', label: 'WebApp' }, { value: 'action', label: '动作' }, { value: 'inline_query', label: '插入文本' }, { value: 'switch_inline_query', label: '转发查询' }, { value: 'raw', label: '原始回调' } ], v => { button.type = v; button.payload = {}; renderPayloadFields(); });
+        const typeSelect = createSelect(button.type, [ { value: 'command', label: '指令' }, { value: 'url', label: '链接' }, { value: 'submenu', label: '子菜单' }, { value: 'web_app', label: 'WebApp' }, { value: 'action', label: '动作' }, { value: 'workflow', label: '工作流' }, { value: 'inline_query', label: '插入文本' }, { value: 'switch_inline_query', label: '转发查询' }, { value: 'raw', label: '原始回调' } ], v => { button.type = v; button.payload = {}; renderPayloadFields(); });
         const typeField = createField('类型', typeSelect);
         const payloadContainer = document.createElement('div');
 
@@ -368,7 +487,14 @@
                 case 'url': payloadField = createField('链接URL', createInput('text', button.payload.url || '', v => button.payload.url = v)); break;
                 case 'submenu': payloadField = createField('目标菜单', createSelect(button.payload.menu_id || '', getMenuOptions(), v => button.payload.menu_id = v)); break;
                 case 'web_app': payloadField = createField('WebApp', createSelect(button.payload.web_app_id || '', Object.keys(state.web_apps || {}).map(id => ({value: id, label: `${state.web_apps[id].name} (${id})`})), v => button.payload.web_app_id = v)); break;
-                case 'action': payloadField = createField('动作', createSelect(button.payload.action_id || '', Object.keys(state.actions).map(id => ({value: id, label: `${state.actions[id].name} (${id})`})), v => button.payload.action_id = v)); break;
+                case 'action':
+                    const actionOptions = Object.keys(state.actions || {}).map(id => ({ value: id, label: `${state.actions[id].name} (${id})` }));
+                    payloadField = createField('动作', createSelect(button.payload.action_id || '', actionOptions, v => button.payload.action_id = v));
+                    break;
+                case 'workflow':
+                    const wfOptions = Object.keys(state.workflows || {}).map(id => ({ value: id, label: state.workflows[id].name || id }));
+                    payloadField = createField('工作流', createSelect(button.payload.workflow_id || '', wfOptions, v => button.payload.workflow_id = v));
+                    break;
                 case 'inline_query': payloadField = createField('插入内容', createInput('text', button.payload.query || '', v => button.payload.query = v)); break;
                 case 'raw': payloadField = createField('回调数据', createTextarea(button.payload.callback_data || '', v => button.payload.callback_data = v)); break;
                 case 'switch_inline_query': payloadField = createField('查询内容', createInput('text', button.payload.query || '', v => button.payload.query = v)); break;
@@ -433,6 +559,10 @@
         const testBtn = document.createElement('button');
         testBtn.textContent = '测试动作';
         testBtn.className = 'secondary test-action-btn';
+
+        // 错误修复：在模态框打开时，根据按钮类型设置初始可见性。
+        testBtn.style.display = button.type === 'action' ? '' : 'none';
+
         testBtn.onclick = async () => {
             const actionId = button.payload.action_id;
             const action = state.actions[actionId];
@@ -528,7 +658,132 @@
         openModal('动作测试结果', body, footer);
     }
 
-    // --- Helpers & Init ---
+    function openNodeConfigModal(node) {
+        if (!node || !node.data || !node.data.action) {
+            console.warn("无法配置节点: 动作数据丢失。", node);
+            showInfoModal("无法配置此节点，因为它缺少内部动作定义。", true);
+            return;
+        }
+
+        const action = node.data.action;
+        const currentData = node.data.data || {};
+        const title = `配置节点: ${action.name || action.id}`;
+
+        const body = document.createElement('div');
+        body.className = 'node-config-form';
+
+        const params = action.isModular ? action.inputs : (action.isLocal ? action.parameters : []);
+
+        if (!params || params.length === 0) {
+            body.innerHTML = '<p class="muted">此节点没有可配置的参数。</p>';
+        } else {
+            params.forEach((param, index) => {
+                const paramName = param.name;
+                const paramLabel = `${param.name}${param.type ? ` (${param.type})` : ''}`;
+                const paramDescription = param.description || '';
+                const inputPortName = `input_${index + 1}`;
+                const isConnected = node.inputs[inputPortName] && node.inputs[inputPortName].connections.length > 0;
+
+                let field;
+
+                if (param.type === 'boolean') {
+                    field = document.createElement('div');
+                    field.className = 'field'; // 使用标准 'field' 类
+
+                    const label = document.createElement('label');
+                    label.textContent = paramLabel;
+                    field.appendChild(label);
+
+                    const switchWrapper = document.createElement('label');
+                    switchWrapper.className = 'switch-toggle';
+
+                    const value = isConnected ? false : (currentData[paramName] ?? (param.default ?? false));
+                    const input = createInput('checkbox', '', null);
+                    input.dataset.paramName = paramName;
+                    input.checked = !!value;
+                    input.disabled = isConnected;
+
+                    const slider = document.createElement('span');
+                    slider.className = 'slider';
+
+                    switchWrapper.append(input, slider);
+                    field.appendChild(switchWrapper);
+
+                    if (paramDescription) {
+                        const descEl = document.createElement('p');
+                        descEl.className = 'field-description muted';
+                        descEl.textContent = paramDescription;
+                        // 附加在开关之后，但在 field 包装器内部
+                        field.appendChild(descEl);
+                    }
+
+                    if (isConnected) {
+                         const connectedNotice = document.createElement('p');
+                        connectedNotice.className = 'field-description muted';
+                        connectedNotice.textContent = '值由上游节点提供';
+                        field.appendChild(connectedNotice);
+                    }
+                } else {
+                    const value = isConnected ? '' : (currentData[paramName] ?? (param.default ?? ''));
+                    const placeholder = isConnected ? '值由上游节点提供' : '';
+
+                    const input = createTextarea(value, null);
+                    input.dataset.paramName = paramName;
+                    input.disabled = isConnected;
+                    input.placeholder = placeholder;
+
+                    field = createField(paramLabel, input);
+                    if (paramDescription) {
+                        const descEl = document.createElement('p');
+                        descEl.className = 'field-description muted';
+                        descEl.textContent = paramDescription;
+                        field.appendChild(descEl);
+                    }
+                }
+                body.appendChild(field);
+            });
+        }
+
+        const footer = document.createElement('div');
+        footer.style.cssText = "width: 100%; display: flex; justify-content: flex-end; gap: 12px;";
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = '取消';
+        cancelBtn.className = 'secondary';
+        cancelBtn.onclick = closeModal;
+
+        const saveBtn = document.createElement('button');
+        saveBtn.textContent = '保存';
+        saveBtn.onclick = () => {
+            const finalData = { ...currentData };
+
+            // 错误修复：同时查询 textarea 和 checkbox，以正确保存状态。
+            body.querySelectorAll('textarea[data-param-name], input[type="checkbox"][data-param-name]').forEach(input => {
+                const key = input.dataset.paramName;
+                if (key) {
+                    if (input.disabled) {
+                        delete finalData[key];
+                    } else {
+                        // 根据输入类型保存值
+                        finalData[key] = input.type === 'checkbox' ? input.checked : input.value;
+                    }
+                }
+            });
+
+            if (window.tgButtonEditor && window.tgButtonEditor.updateNodeConfig) {
+                window.tgButtonEditor.updateNodeConfig(node.id, finalData);
+            } else {
+                console.error("错误: editor.js 没有提供 updateNodeConfig 函数。");
+            }
+
+            closeModal();
+        };
+
+        footer.append(cancelBtn, saveBtn);
+        openModal(title, body, footer);
+    }
+
+    // --- 辅助函数与初始化 ---
     function createField(labelText, inputEl) { const field = document.createElement('div'); field.className = 'field'; field.innerHTML = `<label>${labelText}</label>`; field.appendChild(inputEl); return field; }
     function createInput(type, value, onChange) { const input = document.createElement('input'); input.type = type; input.value = value ?? ''; if (onChange) input.oninput = e => onChange(e.target.value); return input; }
     function createSelect(value, options, onChange) { const select = document.createElement('select'); select.innerHTML = `<option value="">（请选择）</option>` + (options || []).map(opt => `<option value="${opt.value}">${opt.label}</option>`).join(''); select.value = value ?? ''; if (onChange) select.onchange = e => onChange(e.target.value); return select; }
@@ -552,81 +807,113 @@
         indicator.style.width = `${targetRect.width}px`;
 
         if (!animate) {
-            void indicator.offsetWidth; // Force reflow to apply instant position
-            indicator.style.transition = ''; // Restore transitions for future clicks
+            void indicator.offsetWidth; // 强制重排以应用即时位置
+            indicator.style.transition = ''; // 为将来的点击恢复过渡效果
         }
     }
 
-    // --- Event Listeners ---
+    // --- 事件监听器 ---
+    document.getElementById('drawflow').addEventListener('opennodeconfig', (e) => {
+        if (e.detail && e.detail.node) {
+            openNodeConfigModal(e.detail.node);
+        }
+    });
+
     addMenuBtn.onclick = async () => { const id = await generateId('menu'); state.menus[id] = { id, name: '新菜单', header: '新菜单标题', items: [] }; renderAll(); };
     addUnassignedBtn.onclick = () => openButtonEditor(null, null);
     addActionBtn.onclick = async () => { const id = await generateId('action'); state.actions[id] = { id, name: '新动作', kind: 'http', config: { request: { method: 'GET', url: 'https://' } } }; renderAll({ openNewId: id, type: 'action' }); };
     addWebappBtn.onclick = async () => { const id = await generateId('webapp'); state.web_apps = state.web_apps || {}; state.web_apps[id] = { id, name: '新WebApp', kind: 'external', url: 'https://' }; renderAll({ openNewId: id, type: 'webapp' }); };
     refreshBtn.onclick = () => loadState().catch(err => showInfoModal(err.message, true));
     saveBtn.onclick = async () => {
-        const actionConfigTextareas = document.querySelectorAll('#actionsContainer textarea[data-action-id]');
+        // 首先，验证主界面中所有可见的 JSON 文本区域
+        const actionConfigTextareas = document.querySelectorAll('#actionsContainer .json-config-input');
         for (const textarea of actionConfigTextareas) {
             try {
-                const actionId = textarea.dataset.actionId;
-                const config = state.actions[actionId].config;
-                if (typeof config !== 'object') {
-                   JSON.parse(textarea.value);
-                }
+                JSON.parse(textarea.value);
             } catch (e) {
-                const actionId = textarea.dataset.actionId;
-                const actionName = state.actions[actionId]?.name || actionId;
-                showInfoModal(`保存失败！\n动作 “${actionName}” 的配置 (JSON) 格式错误，请修正后再保存。\n\n${e.message}`, true);
                 const details = textarea.closest('details');
+                const id = details ? details.dataset.id : '未知';
+                showInfoModal(`保存失败！\n动作 “${id}” 的配置 (JSON) 格式错误，请修正后再保存。\n\n${e.message}`, true);
                 if (details) details.open = true;
                 textarea.focus();
                 return;
             }
         }
 
-        try { 
-            await api('/api/state', { method: 'PUT', body: state }); 
-            showInfoModal('保存成功！'); 
-        } catch(err) { 
-            showInfoModal(`保存失败: ${err.message}`, true); 
-        } 
+        try {
+            // 步骤 1: 通知编辑器保存其当前状态。如果需要，它会提示输入名称。
+            // 这将返回一个 promise，当用户提供名称或取消时，该 promise 会被解析。
+            const savePromise = window.tgButtonEditor.saveCurrentWorkflow();
+
+            // 无论成功还是失败，我们都会继续，因为用户可能会取消提示。
+            savePromise.then(async () => {
+                // 步骤 2: 既然编辑器的潜在更改已提交到服务器，
+                // 获取所有工作流的最终列表。
+                const workflowsFromServer = await api('/api/workflows');
+                state.workflows = workflowsFromServer;
+
+                // 步骤 3: 保存整个现已完全一致的应用程序状态。
+                await api('/api/state', { method: 'PUT', body: state });
+                showInfoModal('保存成功！');
+            }).catch(error => {
+                // 这里会捕获来自 saveCurrentWorkflow 的错误（例如，用户取消提示）
+                // 或来自后续的 API 调用。
+                showInfoModal(`操作被中断或失败: ${error.message}`, true);
+            });
+        } catch (err) {
+            showInfoModal(`保存失败: ${err.message}`, true);
+        }
     };
     exportBtn.onclick = () => { const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'tg_button_config.json'; a.click(); URL.revokeObjectURL(a.href); };
         document.querySelector('.tab-nav').addEventListener('click', (e) => {
         const targetLink = e.target.closest('.tab-link');
         if (targetLink && !targetLink.classList.contains('active')) {
             const tabId = targetLink.dataset.tab;
+
+
             const newContent = document.getElementById(tabId);
             const activeContent = document.querySelector('.tab-content.active');
 
-            // Update links and trigger indicator animation immediately
+            // 立即更新链接并触Indicators动画
             document.querySelectorAll('.tab-link').forEach(link => link.classList.remove('active'));
             targetLink.classList.add('active');
             updateTabIndicator(targetLink);
 
-            // New, reliable fade logic with setTimeout
+            // 新的、可靠的、使用 setTimeout 的淡出逻辑
             if (activeContent) {
-                activeContent.classList.remove('active'); // Start fade-out
+                activeContent.classList.remove('active'); // 开始淡出
             }
 
             setTimeout(() => {
                 if (activeContent) {
-                    activeContent.style.display = 'none'; // Hide old content after fade-out
+                    activeContent.style.display = 'none'; // 淡出后隐藏旧内容
                 }
                 if (newContent) {
-                    newContent.style.display = 'block'; // Prepare new content
-                    // A tiny delay to ensure 'display: block' is applied before starting the fade-in
+                    newContent.style.display = 'block'; // 准备新内容
+                    // 一个微小的延迟，以确保在开始淡入之前应用 'display: block'
                     setTimeout(() => newContent.classList.add('active'), 10);
                 }
-            }, 300); // Wait for the CSS transition to complete (0.3s)
+            }, 300); // 等待 CSS 过渡完成 (0.3秒)
         }
     });
-    
+
     window.addEventListener('resize', () => updateTabIndicator(document.querySelector('.tab-link.active'), false));
 
-    // --- Initial Load ---
+    // --- 用于监听来自编辑器的工作流更新的事件 ---
+    window.addEventListener('workflowsUpdated', async () => {
+        try {
+            const workflowsFromServer = await api('/api/workflows');
+            state.workflows = workflowsFromServer;
+            console.log('Workflow list updated automatically in main state.');
+        } catch (err) {
+            console.error('Failed to refresh workflows after update:', err);
+        }
+    });
+
+    // --- 初始加载 ---
     loadState()
         .then(() => {
-            // Set initial indicator position without animation
+            // 设置指示器的初始位置，无动画
             updateTabIndicator(document.querySelector('.tab-link.active'), false);
         })
         .catch(err => console.error('Failed to load initial state:', err));
