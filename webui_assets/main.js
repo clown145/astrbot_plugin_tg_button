@@ -729,17 +729,170 @@
         }
 
         const action = node.data.action;
-        const currentData = node.data.data || {};
+        const rawNodeData = node.data.data ? { ...node.data.data } : {};
+        const conditionConfig = Object.prototype.hasOwnProperty.call(
+            rawNodeData,
+            "__condition__"
+        )
+            ? rawNodeData.__condition__
+            : undefined;
+        if (Object.prototype.hasOwnProperty.call(rawNodeData, "__condition__")) {
+            delete rawNodeData.__condition__;
+        }
+        const currentData = rawNodeData;
         const title = `配置节点: ${action.name || action.id}`;
 
         const body = document.createElement('div');
         body.className = 'node-config-form';
 
+        const conditionSectionHeader = document.createElement('h4');
+        conditionSectionHeader.textContent = '执行条件';
+        conditionSectionHeader.style.marginTop = '0';
+        body.appendChild(conditionSectionHeader);
+
+        const conditionIntro = document.createElement('p');
+        conditionIntro.className = 'field-description muted';
+        conditionIntro.style.margin = '0 0 12px 0';
+        conditionIntro.textContent = '可以在这里设置该节点的触发条件；当条件不成立时，节点以及所有下游节点都会被跳过。';
+        body.appendChild(conditionIntro);
+
+        const detectConditionMode = (value) => {
+            if (value === undefined || value === null) return 'none';
+            if (typeof value === 'boolean') return 'boolean';
+            if (typeof value === 'string') return 'template';
+            return 'json';
+        };
+
+        let conditionMode = detectConditionMode(conditionConfig);
+        let conditionBoolValue = typeof conditionConfig === 'boolean' ? conditionConfig : true;
+        let conditionTemplateValue = typeof conditionConfig === 'string' ? conditionConfig : '';
+        let conditionJsonValue = conditionMode === 'json'
+            ? (() => {
+                try {
+                    return JSON.stringify(conditionConfig, null, 2);
+                } catch (err) {
+                    console.warn('无法格式化条件配置，将使用原始值。', err);
+                    return String(conditionConfig ?? '');
+                }
+            })()
+            : '';
+
+        const conditionModeSelect = document.createElement('select');
+        [
+            { value: 'none', label: '不设置条件（始终执行）' },
+            { value: 'boolean', label: '简单布尔值' },
+            { value: 'template', label: '模板表达式（Jinja2）' },
+            { value: 'json', label: '高级 JSON 配置' },
+        ].forEach(opt => {
+            const optionEl = document.createElement('option');
+            optionEl.value = opt.value;
+            optionEl.textContent = opt.label;
+            conditionModeSelect.appendChild(optionEl);
+        });
+        conditionModeSelect.value = conditionMode;
+
+        const conditionModeField = createField('条件类型', conditionModeSelect);
+        body.appendChild(conditionModeField);
+
+        const conditionDetailsWrapper = document.createElement('div');
+        const conditionDetailsField = createField('条件配置', conditionDetailsWrapper);
+        body.appendChild(conditionDetailsField);
+
+        const renderConditionFields = () => {
+            conditionDetailsWrapper.innerHTML = '';
+            if (conditionMode === 'none') {
+                const tip = document.createElement('p');
+                tip.className = 'field-description muted';
+                tip.style.margin = '4px 0 0 0';
+                tip.textContent = '未设置条件时，节点总是会执行。';
+                conditionDetailsWrapper.appendChild(tip);
+                return;
+            }
+
+            if (conditionMode === 'boolean') {
+                const select = document.createElement('select');
+                [
+                    { value: 'true', label: 'True（执行）' },
+                    { value: 'false', label: 'False（跳过）' },
+                ].forEach(opt => {
+                    const optionEl = document.createElement('option');
+                    optionEl.value = opt.value;
+                    optionEl.textContent = opt.label;
+                    select.appendChild(optionEl);
+                });
+                select.value = conditionBoolValue ? 'true' : 'false';
+                select.onchange = (e) => {
+                    conditionBoolValue = e.target.value === 'true';
+                };
+
+                const hint = document.createElement('p');
+                hint.className = 'field-description muted';
+                hint.style.margin = '8px 0 0 0';
+                hint.textContent = '选择 False 可以强制跳过该节点（常用于调试）。';
+
+                conditionDetailsWrapper.appendChild(select);
+                conditionDetailsWrapper.appendChild(hint);
+                return;
+            }
+
+            if (conditionMode === 'template') {
+                const textarea = createTextarea(conditionTemplateValue, (val) => {
+                    conditionTemplateValue = val;
+                });
+                textarea.placeholder = '例如：{{ variables.enabled }} 或 {{ runtime.user_id == 123456 }}';
+                textarea.rows = 3;
+
+                const hint = document.createElement('p');
+                hint.className = 'field-description muted';
+                hint.style.margin = '8px 0 0 0';
+                hint.textContent = '模板渲染结果会被解释为布尔值：空字符串、0、false 会视为条件不满足。';
+
+                conditionDetailsWrapper.appendChild(textarea);
+                conditionDetailsWrapper.appendChild(hint);
+                return;
+            }
+
+            const textarea = createTextarea(conditionJsonValue, (val) => {
+                conditionJsonValue = val;
+                try {
+                    if (val.trim()) {
+                        JSON.parse(val);
+                        textarea.style.borderColor = 'var(--border-color)';
+                    } else {
+                        textarea.style.borderColor = 'var(--border-color)';
+                    }
+                } catch (err) {
+                    textarea.style.borderColor = 'var(--danger-primary)';
+                }
+            });
+            textarea.classList.add('json-config-input');
+            textarea.placeholder = '{"type": "template", "template": "{{ inputs.ok }}" }';
+
+            const hint = document.createElement('p');
+            hint.className = 'field-description muted';
+            hint.style.margin = '8px 0 0 0';
+            hint.textContent = '适用于需要复杂条件的情况；填写任意合法的 JSON，保存前会尝试解析。';
+
+            conditionDetailsWrapper.appendChild(textarea);
+            conditionDetailsWrapper.appendChild(hint);
+        };
+
+        conditionModeSelect.onchange = (e) => {
+            conditionMode = e.target.value;
+            renderConditionFields();
+        };
+
+        renderConditionFields();
+
         const inputs = action.isModular ? action.inputs : (action.isLocal ? action.parameters : []);
         const outputs = action.isModular ? (action.outputs || []) : [];
 
         if ((!inputs || inputs.length === 0) && (!outputs || outputs.length === 0)) {
-            body.innerHTML = '<p class="muted">此节点没有可配置或可查看的参数。</p>';
+            const noParams = document.createElement('p');
+            noParams.className = 'muted';
+            noParams.style.marginTop = '16px';
+            noParams.textContent = '此节点没有可配置或可查看的参数。';
+            body.appendChild(noParams);
         } else {
             if (inputs && inputs.length > 0) {
                 const inputsHeader = document.createElement('h4');
@@ -857,6 +1010,31 @@
                     }
                 }
             });
+
+            if (conditionMode === 'none') {
+                delete finalData.__condition__;
+            } else if (conditionMode === 'boolean') {
+                finalData.__condition__ = conditionBoolValue;
+            } else if (conditionMode === 'template') {
+                const trimmed = (conditionTemplateValue || '').trim();
+                if (!trimmed) {
+                    delete finalData.__condition__;
+                } else {
+                    finalData.__condition__ = trimmed;
+                }
+            } else if (conditionMode === 'json') {
+                const raw = conditionJsonValue || '';
+                if (!raw.trim()) {
+                    delete finalData.__condition__;
+                } else {
+                    try {
+                        finalData.__condition__ = JSON.parse(raw);
+                    } catch (err) {
+                        showInfoModal(`保存失败：条件配置不是有效的 JSON。\n\n${err.message}`, true);
+                        return;
+                    }
+                }
+            }
 
             if (window.tgButtonEditor && window.tgButtonEditor.updateNodeConfig) {
                 window.tgButtonEditor.updateNodeConfig(node.id, finalData);
