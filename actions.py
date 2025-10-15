@@ -144,6 +144,7 @@ class ActionExecutor:
         plugin: "DynamicButtonFrameworkPlugin",
         action: "ModularAction",
         *,
+        runtime: RuntimeContext,
         preview: bool = False,
         input_params: Dict[str, Any],
     ) -> ActionExecutionResult:
@@ -178,6 +179,8 @@ class ActionExecutor:
             sig = inspect.signature(action.execute)
             if "plugin" in sig.parameters:
                 params_to_pass["plugin"] = plugin
+            if "runtime" in sig.parameters:
+                params_to_pass["runtime"] = runtime
 
             # 执行动作的异步函数
             result_dict = await action.execute(**params_to_pass)
@@ -375,7 +378,11 @@ class ActionExecutor:
                     input_params, render_context
                 )
                 result = await self._execute_modular(
-                    plugin, definition, preview=preview, input_params=rendered_params
+                    plugin,
+                    definition,
+                    runtime=current_runtime,
+                    preview=preview,
+                    input_params=rendered_params,
                 )
             elif kind == "local":
                 current_runtime.variables.update(input_params)
