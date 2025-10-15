@@ -5,13 +5,23 @@
 
 _✨ 为 AstrBot 在 Telegram 中添加交互式按钮的插件，现已更新 WebUI 以方便管理。 ✨_
 
-[![Version](https://img.shields.io/badge/Version-1.2.1-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
+[![Version](https://img.shields.io/badge/Version-1.2.2-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
 [![AstrBot](https://img.shields.io/badge/AstrBot-v4.0%2B-orange.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![GitHub](https://img.shields.io/badge/作者-clown145-blue)](https://github.com/clown145)
 
 </div>
+
+## 主要更新 (V1.2.2) - 新增消息操作动作
+
+*   **✨ 新增消息编辑与删除动作**:
+    *   `编辑消息文本`: 用于更新纯文本消息的内容。
+    *   `编辑媒体消息`: 用于更新带媒体消息的图片/语音和/或说明文字。
+    *   `删除消息`: 用于删除任意指定的消息。
+*   **📚 文档更新**: 在工作流文档中为新动作添加了详细说明和“阅后即焚”高级教程。
+
+---
 
 ## 主要更新 (V1.2.1) - 功能增强与修复
 
