@@ -1,4 +1,3 @@
-
 ACTION_METADATA = {
     "id": "provide_static_string",
     "name": "提供静态字符串",
@@ -6,10 +5,9 @@ ACTION_METADATA = {
     "inputs": [
         {"name": "value", "type": "string", "description": "要输出的字符串值。"}
     ],
-    "outputs": [
-        {"name": "output", "type": "string", "description": "输出的字符串。"}
-    ]
+    "outputs": [{"name": "output", "type": "string", "description": "输出的字符串。"}],
 }
+
 
 async def execute(value: str) -> dict:
     """简单地返回输入的静态值。"""

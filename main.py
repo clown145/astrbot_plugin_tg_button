@@ -5,6 +5,9 @@ AstrBot 动态按钮框架的核心插件文件。
 """
 
 import asyncio
+import hashlib
+import os
+import shutil
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -22,8 +25,17 @@ try:
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
     from telegram.ext import Application, CallbackQueryHandler, ExtBot
 except ImportError:  # 可选依赖
-    logger.error("Telegram 库未安装，请在 AstrBot 环境中执行 pip install python-telegram-bot")
-    Application, CallbackQueryHandler, ExtBot, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo = (None,) * 6
+    logger.error(
+        "Telegram 库未安装，请在 AstrBot 环境中执行 pip install python-telegram-bot"
+    )
+    (
+        Application,
+        CallbackQueryHandler,
+        ExtBot,
+        InlineKeyboardButton,
+        InlineKeyboardMarkup,
+        WebAppInfo,
+    ) = (None,) * 6
 
 # --- 本地模块导入 ---
 from dataclasses import dataclass, field
@@ -37,13 +49,20 @@ from . import commands
 from . import handlers
 from . import local_actions
 from .actions import ActionExecutor
-from .storage import ButtonStore, ButtonsModel, ButtonDefinition, MenuDefinition, WebAppDefinition
+from .storage import (
+    ButtonStore,
+    ButtonsModel,
+    ButtonDefinition,
+    MenuDefinition,
+    WebAppDefinition,
+)
 from .modular_actions import ModularActionRegistry
 
 
 @dataclass
 class RegisteredAction:
     """表示一个由插件注册的自定义动作。"""
+
     name: str
     function: Callable
     description: str
@@ -52,11 +71,14 @@ class RegisteredAction:
 
 class ActionRegistry:
     """存储和管理基于代码的自定义动作。"""
+
     def __init__(self, logger):
         self._actions: Dict[str, RegisteredAction] = {}
         self.logger = logger
 
-    def register(self, name: str, function: Callable, description: str, params: Dict) -> bool:
+    def register(
+        self, name: str, function: Callable, description: str, params: Dict
+    ) -> bool:
         if name in self._actions:
             self.logger.warning(f"本地动作 '{name}' 已存在，无法重复注册。")
             return False
@@ -73,10 +95,13 @@ class ActionRegistry:
 
 class TgButtonApi:
     """供其他插件与 TG Button 插件交互的公共 API。"""
+
     def __init__(self, registry: ActionRegistry):
         self._registry = registry
 
-    def register_local_action(self, name: str, function: Callable, description: str, params: Dict):
+    def register_local_action(
+        self, name: str, function: Callable, description: str, params: Dict
+    ):
         """
         允许其他插件注册自己的本地动作。
         参数:
@@ -87,19 +112,33 @@ class TgButtonApi:
         """
         self._registry.register(name, function, description, params)
 
+
 from .webui import WebUIServer
 
 BACK_BUTTON_TEXT = "返回"
 
+
 def get_plugin_data_path() -> Path:
     return StarTools.get_data_dir(PLUGIN_NAME)
+
+
+def _get_file_hash(path: Path) -> str:
+    """计算文件的 SHA256 哈希值。"""
+    sha256 = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            while chunk := f.read(8192):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+    except IOError:
+        return ""
 
 
 @register(
     PLUGIN_NAME,
     "clown145",
     "一个可以通过 Telegram 按钮与自定义 WebUI 管理的插件",
-    "1.2.0",
+    "1.2.1",
     "https://github.com/clown145/astrbot_plugin_tg_button",
 )
 class DynamicButtonFrameworkPlugin(Star):
@@ -109,20 +148,34 @@ class DynamicButtonFrameworkPlugin(Star):
         self.settings = build_settings(config)
         self.logger = logger
 
+        # --- 核心路径和目录设置 ---
+        self.plugin_data_dir = get_plugin_data_path()
+        self.temp_dir = self.plugin_data_dir / "temp"
+        os.makedirs(self.temp_dir, exist_ok=True)
+        self.logger.info(f"临时文件目录已确保存在: {self.temp_dir}")
+
         # 核心插件组件
         self.menu_command = self.settings["menu_command"]
         self.menu_header = self.settings["menu_header_text"]
         self.webui_enabled = self.settings["webui_enabled"]
         self.webui_exclusive = self.webui_enabled and self.settings["webui_exclusive"]
-        self.button_store = ButtonStore(get_plugin_data_path(), logger=logger, default_header=self.menu_header)
+        self.button_store = ButtonStore(
+            self.plugin_data_dir, logger=logger, default_header=self.menu_header
+        )
 
         # --- 用于本地动作和 API 的新组件 ---
         self.action_registry = ActionRegistry(logger=logger)
-        self.modular_actions_dir = get_plugin_data_path() / "modular_actions"
-        self.modular_action_registry = ModularActionRegistry(logger=logger, actions_dir=self.modular_actions_dir)
+        self.modular_actions_dir = self.plugin_data_dir / "modular_actions"
+        self.modular_action_registry = ModularActionRegistry(
+            logger=logger, actions_dir=self.modular_actions_dir
+        )
         self.api = TgButtonApi(self.action_registry)
 
-        self.action_executor = ActionExecutor(logger=logger, registry=self.action_registry, modular_registry=self.modular_action_registry)
+        self.action_executor = ActionExecutor(
+            logger=logger,
+            registry=self.action_registry,
+            modular_registry=self.modular_action_registry,
+        )
         self.webui_server: Optional[WebUIServer] = None
 
         # Telegram 特定状态
@@ -179,17 +232,17 @@ class DynamicButtonFrameworkPlugin(Star):
                 should_copy = True
                 synced_count += 1
             else:
-                # 如果目标文件已存在，比较最后修改时间
-                src_mtime = src_file.stat().st_mtime
-                target_mtime = target_file.stat().st_mtime
-                if src_mtime > target_mtime:
+                # 如果目标文件已存在，比较文件内容的哈希值
+                src_hash = _get_file_hash(src_file)
+                target_hash = _get_file_hash(target_file)
+                if src_hash != target_hash:
                     should_copy = True
                     updated_count += 1
 
             if should_copy:
                 try:
-                    content = src_file.read_text(encoding='utf-8')
-                    target_file.write_text(content, encoding='utf-8')
+                    content = src_file.read_text(encoding="utf-8")
+                    target_file.write_text(content, encoding="utf-8")
                 except Exception as e:
                     self.logger.error(f"同步预设动作文件 {src_file.name} 失败: {e}")
 
@@ -221,7 +274,9 @@ class DynamicButtonFrameworkPlugin(Star):
     async def terminate(self):
         if self._callback_handler and self._telegram_application:
             try:
-                self._telegram_application.remove_handler(self._callback_handler, group=1)
+                self._telegram_application.remove_handler(
+                    self._callback_handler, group=1
+                )
             except Exception as exc:
                 logger.error(f"移除 Telegram 回调处理器时出错: {exc}", exc_info=True)
             self._callback_handler = None
@@ -230,6 +285,17 @@ class DynamicButtonFrameworkPlugin(Star):
             await self.webui_server.stop()
             self.webui_server = None
         await self.action_executor.close()
+
+        # --- 新增的缓存清理逻辑 ---
+        try:
+            if os.path.exists(self.temp_dir):
+                shutil.rmtree(self.temp_dir)
+                self.logger.info(f"插件停用/重载，已清空临时文件目录: {self.temp_dir}")
+        except Exception as exc:
+            self.logger.error(
+                f"清理临时文件目录 {self.temp_dir} 失败: {exc}", exc_info=True
+            )
+        # --- 清理逻辑结束 ---
 
     # --- 内部设置 ---
 
@@ -298,8 +364,27 @@ class DynamicButtonFrameworkPlugin(Star):
     # 会通过 'plugin' 实例来使用它们。
 
     async def _dispatch_command(self, query, command_text: str):
+        """
+        [!!] 核心风险点：事件模拟 (Event Faking) [!!]
+        此方法通过手动构建一个`AstrMessageEvent`对象并将其放入事件队列，
+        来模拟一个真实的用户命令输入。这是一种绕过标准事件处理流程的“hack”手段，
+        目的是为了能从一个按钮回调中触发另一个命令的功能。
+
+        风险:
+        - 脆弱性: 此实现强依赖`AstrBot`和`TelegramPlatformEvent`的内部结构。
+          如果未来`AstrBot`的版本更新修改了这些对象的构造方式或必需的属性，
+          此处的代码将会失效并导致运行时错误。
+        - 难以调试: 这种方式创建的事件在日志和追踪中可能难以与真实用户事件区分开。
+
+        保留原因:
+        - 目前这是在按钮框架内实现“执行一个命令”这一功能的唯一方式。
+        """
         platform = self.context.get_platform("telegram")
-        if not platform or not (client := self._get_telegram_client()) or not (message := query.message):
+        if (
+            not platform
+            or not (client := self._get_telegram_client())
+            or not (message := query.message)
+        ):
             return
 
         fake_message = AstrBotMessage()
@@ -321,7 +406,8 @@ class DynamicButtonFrameworkPlugin(Star):
         sender = message.from_user
         fake_message.sender = MessageMember(
             user_id=str(sender.id) if sender else "unknown",
-            nickname=(sender.full_name if sender else None) or (sender.username if sender else "Unknown"),
+            nickname=(sender.full_name if sender else None)
+            or (sender.username if sender else "Unknown"),
         )
         fake_message.message_str = command_text
         fake_message.raw_message = query
@@ -340,6 +426,19 @@ class DynamicButtonFrameworkPlugin(Star):
         self.context.get_event_queue().put_nowait(fake_event)
 
     async def start_search_session(self, runtime: Any, **kwargs) -> Dict[str, Any]:
+        """
+        [!!] 核心风险点：事件模拟 (Event Faking) [!!]
+        此方法与 `_dispatch_command` 类似，通过构建一个伪事件对象 `fake_event`
+        来启动一个 `session_waiter`。这是为了在一个异步的、由按钮触发的工作流中，
+        能够暂停并等待用户的下一次消息输入。
+
+        风险:
+        - 与 `_dispatch_command` 相同的脆弱性，强依赖 `AstrBot` 内部事件结构。
+        - 如果 `session_waiter` 的工作机制在未来版本中改变，此代码可能失效。
+
+        保留原因:
+        - 这是在无状态的按钮动作中，实现“等待用户输入”这一有状态交互的唯一方式。
+        """
         prompt = kwargs.get("prompt", "请输入内容：")
         timeout = int(kwargs.get("timeout", 60))
         client = self._get_telegram_client()
@@ -351,7 +450,7 @@ class DynamicButtonFrameworkPlugin(Star):
                 chat_id=runtime.chat_id,
                 message_id=runtime.message_id,
                 text=prompt,
-                reply_markup=None  # 等待输入时清除按钮
+                reply_markup=None,  # 等待输入时清除按钮
             )
         except Exception as e:
             self.logger.error(f"编辑消息以提示输入时出错: {e}")
@@ -366,10 +465,17 @@ class DynamicButtonFrameworkPlugin(Star):
             fake_message.session_id = runtime.chat_id
         else:
             fake_message.type = MessageType.GROUP_MESSAGE
-            session_id = f"{runtime.chat_id}#{runtime.thread_id}" if runtime.thread_id is not None else runtime.chat_id
+            session_id = (
+                f"{runtime.chat_id}#{runtime.thread_id}"
+                if runtime.thread_id is not None
+                else runtime.chat_id
+            )
             fake_message.group_id = session_id
             fake_message.session_id = session_id
-        fake_message.sender = MessageMember(user_id=runtime.user_id or "", nickname=runtime.full_name or runtime.username or "")
+        fake_message.sender = MessageMember(
+            user_id=runtime.user_id or "",
+            nickname=runtime.full_name or runtime.username or "",
+        )
         fake_message.message_str = "/fake_command_for_session"
         fake_message.timestamp = int(time.time())
 
@@ -389,7 +495,7 @@ class DynamicButtonFrameworkPlugin(Star):
             await client.edit_message_text(
                 chat_id=runtime.chat_id,
                 message_id=runtime.message_id,
-                text=f"模拟搜索完成。\n您的输入是: '{user_input}'\n\n现在您可以手动恢复菜单。"
+                text=f"模拟搜索完成。\n您的输入是: '{user_input}'\n\n现在您可以手动恢复菜单。",
             )
             controller.stop()
 
@@ -399,20 +505,19 @@ class DynamicButtonFrameworkPlugin(Star):
             await client.edit_message_text(
                 chat_id=runtime.chat_id,
                 message_id=runtime.message_id,
-                text="输入超时，操作已取消。"
+                text="输入超时，操作已取消。",
             )
         except Exception as e:
             self.logger.error(f"会话执行期间出错: {e}", exc_info=True)
             await client.edit_message_text(
                 chat_id=runtime.chat_id,
                 message_id=runtime.message_id,
-                text=f"会话处理失败: {e}"
+                text=f"会话处理失败: {e}",
             )
 
         # 这个本地动作本身不需要向执行器返回任何东西，
         # 因为它自己处理所有用户交互。
         return {}
-
 
     def _get_telegram_client(self) -> Optional[ExtBot]:
         platform = self.context.get_platform("telegram")
@@ -436,7 +541,9 @@ class DynamicButtonFrameworkPlugin(Star):
         if not menu:
             return None, None
         button_entities: List[ButtonDefinition] = [
-            snapshot.buttons.get(btn_id) for btn_id in menu.items if snapshot.buttons.get(btn_id)
+            snapshot.buttons.get(btn_id)
+            for btn_id in menu.items
+            if snapshot.buttons.get(btn_id)
         ]
         overrides = overrides or {}
         rows: List[List[InlineKeyboardButton]] = []
@@ -449,7 +556,9 @@ class DynamicButtonFrameworkPlugin(Star):
         else:
             row_map: Dict[int, List[Tuple[int, InlineKeyboardButton]]] = {}
 
-            def add_widget(row_index: int, col_index: int, widget: InlineKeyboardButton) -> None:
+            def add_widget(
+                row_index: int, col_index: int, widget: InlineKeyboardButton
+            ) -> None:
                 row_map.setdefault(row_index, []).append((col_index, widget))
 
             for btn in button_entities:
@@ -457,13 +566,24 @@ class DynamicButtonFrameworkPlugin(Star):
                 widget = self._create_inline_button(btn, snapshot, override)
                 if not widget:
                     continue
-                layout_override = override.get('layout') if override else None
-                layout_row = layout_override.get('row') if layout_override and 'row' in layout_override else btn.layout.row
-                layout_col = layout_override.get('col') if layout_override and 'col' in layout_override else btn.layout.col
+                layout_override = override.get("layout") if override else None
+                layout_row = (
+                    layout_override.get("row")
+                    if layout_override and "row" in layout_override
+                    else btn.layout.row
+                )
+                layout_col = (
+                    layout_override.get("col")
+                    if layout_override and "col" in layout_override
+                    else btn.layout.col
+                )
                 add_widget(layout_row, layout_col, widget)
 
             for row_idx in sorted(row_map.keys()):
-                ordered = [widget for _, widget in sorted(row_map[row_idx], key=lambda item: item[0])]
+                ordered = [
+                    widget
+                    for _, widget in sorted(row_map[row_idx], key=lambda item: item[0])
+                ]
                 if ordered:
                     rows.append(ordered)
         if not rows:
@@ -484,14 +604,14 @@ class DynamicButtonFrameworkPlugin(Star):
             if btn.layout.rowspan != 1 or btn.layout.colspan != 1:
                 return False
             override = overrides.get(btn.id)
-            if override and override.get('layout'):
+            if override and override.get("layout"):
                 return False
         return True
 
     def _resolve_web_app_url(self, web_app: WebAppDefinition) -> Optional[str]:
-        if web_app.kind == 'external':
+        if web_app.kind == "external":
             return web_app.url
-        return web_app.url or ''
+        return web_app.url or ""
 
     def _resolve_button_overrides(
         self,
@@ -504,11 +624,13 @@ class DynamicButtonFrameworkPlugin(Star):
         for entry in overrides or []:
             if not isinstance(entry, dict):
                 continue
-            target = entry.get('target', 'self')
-            base = {k: v for k, v in entry.items() if k != 'target'}
+            target = entry.get("target", "self")
+            base = {k: v for k, v in entry.items() if k != "target"}
             if not base:
                 continue
-            target_ids = self._resolve_override_targets(snapshot, menu, target, current_button_id)
+            target_ids = self._resolve_override_targets(
+                snapshot, menu, target, current_button_id
+            )
             for button_id in target_ids:
                 bucket = resolved.setdefault(button_id, {})
                 bucket.update(base)
@@ -522,19 +644,19 @@ class DynamicButtonFrameworkPlugin(Star):
         current_button_id: str,
     ) -> List[str]:
         if not target:
-            target = 'self'
+            target = "self"
         lowered = target.lower()
-        if lowered == 'self':
+        if lowered == "self":
             return [current_button_id] if current_button_id in snapshot.buttons else []
-        if lowered.startswith('id:'):
-            candidate = target.split(':', 1)[1]
+        if lowered.startswith("id:"):
+            candidate = target.split(":", 1)[1]
             return [candidate] if candidate in snapshot.buttons else []
-        if lowered.startswith('button:'):
-            candidate = target.split(':', 1)[1]
+        if lowered.startswith("button:"):
+            candidate = target.split(":", 1)[1]
             return [candidate] if candidate in snapshot.buttons else []
-        if lowered.startswith('index:'):
+        if lowered.startswith("index:"):
             try:
-                idx = int(target.split(':', 1)[1])
+                idx = int(target.split(":", 1)[1])
                 if 0 <= idx < len(menu.items):
                     candidate = menu.items[idx]
                     return [candidate] if candidate in snapshot.buttons else []
@@ -553,53 +675,73 @@ class DynamicButtonFrameworkPlugin(Star):
         if not InlineKeyboardButton:
             return None
         override = override or {}
-        text = override.get('text') or button.text or '未命名'
-        if override.get('switch_inline_query') or override.get('switch_inline_query_current_chat'):
+        text = override.get("text") or button.text or "未命名"
+        if override.get("switch_inline_query") or override.get(
+            "switch_inline_query_current_chat"
+        ):
             return InlineKeyboardButton(
                 text,
-                switch_inline_query=override.get('switch_inline_query'),
-                switch_inline_query_current_chat=override.get('switch_inline_query_current_chat'),
+                switch_inline_query=override.get("switch_inline_query"),
+                switch_inline_query_current_chat=override.get(
+                    "switch_inline_query_current_chat"
+                ),
             )
-        raw_callback = override.get('raw_callback_data')
+        raw_callback = override.get("raw_callback_data")
         if raw_callback:
             return InlineKeyboardButton(text, callback_data=raw_callback)
-        btn_type = (override.get('type') or button.type or 'command').lower()
-        if btn_type == 'raw':
-            callback_data = override.get('callback_data') or button.payload.get('callback_data')
+        btn_type = (override.get("type") or button.type or "command").lower()
+        if btn_type == "raw":
+            callback_data = override.get("callback_data") or button.payload.get(
+                "callback_data"
+            )
             if not callback_data:
                 return None
             return InlineKeyboardButton(text, callback_data=callback_data)
-        if btn_type == 'command':
-            if not button.payload.get('command'):
+        if btn_type == "command":
+            if not button.payload.get("command"):
                 return None
-            return InlineKeyboardButton(text, callback_data=f"{self.CALLBACK_PREFIX_COMMAND}{button.id}")
-        if btn_type == 'url':
-            url = override.get('url') or button.payload.get('url')
+            return InlineKeyboardButton(
+                text, callback_data=f"{self.CALLBACK_PREFIX_COMMAND}{button.id}"
+            )
+        if btn_type == "url":
+            url = override.get("url") or button.payload.get("url")
             if not url:
                 return None
             return InlineKeyboardButton(text, url=url)
-        if btn_type == 'submenu':
-            target = override.get('menu_id') or button.payload.get('menu_id')
+        if btn_type == "submenu":
+            target = override.get("menu_id") or button.payload.get("menu_id")
             if not target:
                 return None
-            return InlineKeyboardButton(text, callback_data=f"{self.CALLBACK_PREFIX_MENU}{target}")
-        if btn_type == 'action':
-            if not button.payload.get('action_id'):
+            return InlineKeyboardButton(
+                text, callback_data=f"{self.CALLBACK_PREFIX_MENU}{target}"
+            )
+        if btn_type == "action":
+            if not button.payload.get("action_id"):
                 return None
-            return InlineKeyboardButton(text, callback_data=f"{self.CALLBACK_PREFIX_ACTION}{button.id}")
-        if btn_type == 'workflow':
-            if not button.payload.get('workflow_id'):
+            return InlineKeyboardButton(
+                text, callback_data=f"{self.CALLBACK_PREFIX_ACTION}{button.id}"
+            )
+        if btn_type == "workflow":
+            if not button.payload.get("workflow_id"):
                 return None
-            return InlineKeyboardButton(text, callback_data=f"{self.CALLBACK_PREFIX_WORKFLOW}{button.id}")
-        if btn_type == 'inline_query':
-            query_text = override.get('query') or button.payload.get('query', '')
-            return InlineKeyboardButton(text, switch_inline_query_current_chat=query_text)
-        if btn_type == 'switch_inline_query':
-            query_text = override.get('query') or button.payload.get('query', '')
+            return InlineKeyboardButton(
+                text, callback_data=f"{self.CALLBACK_PREFIX_WORKFLOW}{button.id}"
+            )
+        if btn_type == "inline_query":
+            query_text = override.get("query") or button.payload.get("query", "")
+            return InlineKeyboardButton(
+                text, switch_inline_query_current_chat=query_text
+            )
+        if btn_type == "switch_inline_query":
+            query_text = override.get("query") or button.payload.get("query", "")
             return InlineKeyboardButton(text, switch_inline_query=query_text)
-        if btn_type == 'web_app':
-            web_app_id = override.get('web_app_id') or button.payload.get('web_app_id')
-            url = override.get('web_app_url') or override.get('url') or button.payload.get('url')
+        if btn_type == "web_app":
+            web_app_id = override.get("web_app_id") or button.payload.get("web_app_id")
+            url = (
+                override.get("web_app_url")
+                or override.get("url")
+                or button.payload.get("url")
+            )
             if web_app_id:
                 web_app = snapshot.web_apps.get(web_app_id)
                 if web_app:
@@ -609,14 +751,22 @@ class DynamicButtonFrameworkPlugin(Star):
             if not url or not WebAppInfo:
                 return None
             return InlineKeyboardButton(text, web_app=WebAppInfo(url=url))
-        if btn_type == 'back':
-            target = override.get('menu_id') or button.payload.get('menu_id') or button.payload.get('target_menu')
+        if btn_type == "back":
+            target = (
+                override.get("menu_id")
+                or button.payload.get("menu_id")
+                or button.payload.get("target_menu")
+            )
             if not target:
                 return None
-            return InlineKeyboardButton(text, callback_data=f"{self.CALLBACK_PREFIX_BACK}{target}")
+            return InlineKeyboardButton(
+                text, callback_data=f"{self.CALLBACK_PREFIX_BACK}{target}"
+            )
         return None
 
-    def _find_menu_for_button(self, snapshot: ButtonsModel, button_id: str) -> Optional[MenuDefinition]:
+    def _find_menu_for_button(
+        self, snapshot: ButtonsModel, button_id: str
+    ) -> Optional[MenuDefinition]:
         for menu in snapshot.menus.values():
             if button_id in menu.items:
                 return menu
@@ -630,4 +780,3 @@ class DynamicButtonFrameworkPlugin(Star):
             except ValueError:
                 return chat, None
         return chat_id_str, None
-

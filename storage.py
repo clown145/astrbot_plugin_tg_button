@@ -1,6 +1,9 @@
 import asyncio
 import json
+import os
+import shutil
 import uuid
+from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -13,6 +16,7 @@ def _generate_id(prefix: str) -> str:
 @dataclass
 class LayoutConfig:
     """按钮在网格布局中的位置和尺寸信息。"""
+
     row: int = 0
     col: int = 0
     rowspan: int = 1
@@ -36,6 +40,7 @@ class LayoutConfig:
 @dataclass
 class WebAppDefinition:
     """定义一个可在按钮中使用的 WebApp。"""
+
     id: str
     name: str
     kind: str = "external"  # 类型: external(外部) | internal(内部)
@@ -93,6 +98,7 @@ class WebAppDefinition:
 @dataclass
 class ButtonDefinition:
     """定义一个具体的按钮，包括其文本、类型、负载和布局。"""
+
     id: str
     text: str
     type: str
@@ -140,6 +146,7 @@ class ButtonDefinition:
 @dataclass
 class MenuDefinition:
     """定义一个菜单，它包含一组按钮项和可选的标题。"""
+
     id: str
     name: str
     header: str = ""
@@ -177,6 +184,7 @@ class MenuDefinition:
 @dataclass
 class ActionDefinition:
     """定义一个可执行的动作，如 HTTP 请求或本地函数调用。"""
+
     id: str
     name: str
     kind: str
@@ -218,6 +226,7 @@ class ActionDefinition:
 @dataclass
 class WorkflowNodePosition:
     """工作流中节点的可视化位置。"""
+
     x: float = 0.0
     y: float = 0.0
 
@@ -232,6 +241,7 @@ class WorkflowNodePosition:
 @dataclass
 class WorkflowNode:
     """工作流中的一个节点，代表一个要执行的动作。"""
+
     id: str
     action_id: str
     position: WorkflowNodePosition
@@ -255,6 +265,7 @@ class WorkflowNode:
 @dataclass
 class WorkflowEdge:
     """工作流中的一条边，连接两个节点的输入和输出。"""
+
     id: str
     source_node: str
     source_output: str
@@ -272,6 +283,7 @@ class WorkflowEdge:
 @dataclass
 class WorkflowDefinition:
     """定义一个完整的工作流，包含节点（动作）和边（数据流）。"""
+
     id: str
     name: str
     description: str = ""
@@ -288,7 +300,9 @@ class WorkflowDefinition:
                 node_id: WorkflowNode.from_dict(node_data)
                 for node_id, node_data in (data.get("nodes", {}) or {}).items()
             },
-            edges=[WorkflowEdge.from_dict(edge_data) for edge_data in data.get("edges", [])],
+            edges=[
+                WorkflowEdge.from_dict(edge_data) for edge_data in data.get("edges", [])
+            ],
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -304,6 +318,7 @@ class WorkflowDefinition:
 @dataclass
 class ButtonsModel:
     """插件所有持久化数据的顶层容器。"""
+
     version: int = 2
     menus: Dict[str, MenuDefinition] = field(default_factory=dict)
     buttons: Dict[str, ButtonDefinition] = field(default_factory=dict)
@@ -321,8 +336,14 @@ class ButtonsModel:
             "menus": {menu_id: menu.to_dict() for menu_id, menu in self.menus.items()},
             "buttons": {btn_id: btn.to_dict() for btn_id, btn in self.buttons.items()},
             "actions": {act_id: act.to_dict() for act_id, act in self.actions.items()},
-            "web_apps": {webapp_id: webapp.to_dict() for webapp_id, webapp in self.web_apps.items()},
-            "workflows": {workflow_id: workflow.to_dict() for workflow_id, workflow in self.workflows.items()},
+            "web_apps": {
+                webapp_id: webapp.to_dict()
+                for webapp_id, webapp in self.web_apps.items()
+            },
+            "workflows": {
+                workflow_id: workflow.to_dict()
+                for workflow_id, workflow in self.workflows.items()
+            },
         }
 
     @classmethod
@@ -333,10 +354,22 @@ class ButtonsModel:
         actions_source: Dict[str, Any] = data.get("actions", {}) or {}
         web_apps_source: Dict[str, Any] = data.get("web_apps", {}) or {}
         workflows_source: Dict[str, Any] = data.get("workflows", {}) or {}
-        menus = {menu_id: MenuDefinition.from_dict(menu_dict) for menu_id, menu_dict in menus_source.items()}
-        buttons = {btn_id: ButtonDefinition.from_dict(btn_dict) for btn_id, btn_dict in buttons_source.items()}
-        actions = {act_id: ActionDefinition.from_dict(act_dict) for act_id, act_dict in actions_source.items()}
-        web_apps = {webapp_id: WebAppDefinition.from_dict(webapp_dict) for webapp_id, webapp_dict in web_apps_source.items()}
+        menus = {
+            menu_id: MenuDefinition.from_dict(menu_dict)
+            for menu_id, menu_dict in menus_source.items()
+        }
+        buttons = {
+            btn_id: ButtonDefinition.from_dict(btn_dict)
+            for btn_id, btn_dict in buttons_source.items()
+        }
+        actions = {
+            act_id: ActionDefinition.from_dict(act_dict)
+            for act_id, act_dict in actions_source.items()
+        }
+        web_apps = {
+            webapp_id: WebAppDefinition.from_dict(webapp_dict)
+            for webapp_id, webapp_dict in web_apps_source.items()
+        }
         workflows = {
             workflow_id: WorkflowDefinition.from_dict(workflow_dict)
             for workflow_id, workflow_dict in workflows_source.items()
@@ -356,6 +389,7 @@ class ButtonsModel:
 
 class ButtonStore:
     """负责管理插件数据的持久化，处理文件的加载、保存和迁移。"""
+
     def __init__(self, data_dir: Path, *, logger, default_header: str = "请选择功能"):
         self.data_dir = data_dir
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -363,10 +397,13 @@ class ButtonStore:
         self._default_header = default_header
         self._file_path = self.data_dir / "buttons_v2.json"
         self._legacy_path = self.data_dir / "buttons.json"
+        self._backup_dir = self.data_dir / "old"
+        self._max_backups = 20
         self._lock = asyncio.Lock()
         self._model = self._load()
         self._ensure_defaults()
-        self._save()  # 确保启动时文件存在
+        self._backup_dir.mkdir(parents=True, exist_ok=True)
+        self._save(backup=False)  # 确保启动时文件存在，但不创建备份
 
     @property
     def model(self) -> ButtonsModel:
@@ -385,7 +422,9 @@ class ButtonStore:
             return legacy_model
         return ButtonsModel(
             menus={
-                "root": MenuDefinition.create("root", header=self._default_header, menu_id="root"),
+                "root": MenuDefinition.create(
+                    "root", header=self._default_header, menu_id="root"
+                ),
             },
             buttons={},
             actions={},
@@ -405,7 +444,9 @@ class ButtonStore:
             self._logger.warning("旧按钮配置不是列表，跳过迁移。")
             return None
         menus: Dict[str, MenuDefinition] = {
-            "root": MenuDefinition.create("root", header=self._default_header, menu_id="root"),
+            "root": MenuDefinition.create(
+                "root", header=self._default_header, menu_id="root"
+            ),
         }
         buttons: Dict[str, ButtonDefinition] = {}
         order_row = 0
@@ -435,13 +476,40 @@ class ButtonStore:
 
     def _ensure_defaults(self) -> None:
         if "root" not in self._model.menus:
-            self._model.menus["root"] = MenuDefinition.create("root", header=self._default_header, menu_id="root")
+            self._model.menus["root"] = MenuDefinition.create(
+                "root", header=self._default_header, menu_id="root"
+            )
         for menu in self._model.menus.values():
-            menu.items = [btn_id for btn_id in menu.items if btn_id in self._model.buttons]
+            menu.items = [
+                btn_id for btn_id in menu.items if btn_id in self._model.buttons
+            ]
         if not isinstance(self._model.web_apps, dict):
             self._model.web_apps = {}
 
-    def _save(self) -> None:
+    def _save(self, backup: bool = True) -> None:
+        if backup and self._file_path.exists():
+            try:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                backup_file = self._backup_dir / f"buttons_v2_{timestamp}.json"
+
+                # 使用 os.rename 原子性移动文件，比 shutil.move 更适合此场景
+                os.rename(str(self._file_path), str(backup_file))
+                self._logger.info(f"成功将旧配置文件备份到 {backup_file.name}")
+
+                # 清理旧的备份
+                backups = sorted(
+                    self._backup_dir.glob("buttons_v2_*.json"), key=os.path.getmtime
+                )
+                if len(backups) > self._max_backups:
+                    files_to_delete = backups[
+                        : -self._max_backups
+                    ]  # 保留最新的 self._max_backups 个文件
+                    for f in files_to_delete:
+                        f.unlink()
+                        self._logger.info(f"已删除旧备份文件: {f.name}")
+            except Exception as exc:
+                self._logger.error(f"创建或清理配置文件备份失败: {exc}", exc_info=True)
+
         try:
             with open(self._file_path, "w", encoding="utf-8") as fp:
                 json.dump(self._model.to_dict(), fp, ensure_ascii=False, indent=2)
@@ -466,7 +534,9 @@ class ButtonStore:
             self._save()
             return self._model.clone()
 
-    async def upsert_simple_button(self, text: str, btn_type: str, payload_value: str) -> ButtonDefinition:
+    async def upsert_simple_button(
+        self, text: str, btn_type: str, payload_value: str
+    ) -> ButtonDefinition:
         btn_type = btn_type.lower()
         payload: Dict[str, Any]
         if btn_type == "command":
@@ -477,10 +547,14 @@ class ButtonStore:
             payload = {"value": payload_value}
 
         def mutator(model: ButtonsModel) -> None:
-            existing = next((btn for btn in model.buttons.values() if btn.text == text), None)
+            existing = next(
+                (btn for btn in model.buttons.values() if btn.text == text), None
+            )
             target_menu = model.menus.get("root")
             if not target_menu:
-                model.menus["root"] = MenuDefinition.create("root", header=self._default_header, menu_id="root")
+                model.menus["root"] = MenuDefinition.create(
+                    "root", header=self._default_header, menu_id="root"
+                )
                 target_menu = model.menus["root"]
             if existing:
                 existing.type = btn_type
@@ -488,7 +562,9 @@ class ButtonStore:
                 if existing.id not in target_menu.items:
                     target_menu.items.append(existing.id)
             else:
-                new_button = ButtonDefinition.create(text=text, btn_type=btn_type, payload=payload)
+                new_button = ButtonDefinition.create(
+                    text=text, btn_type=btn_type, payload=payload
+                )
                 model.buttons[new_button.id] = new_button
                 target_menu.items.append(new_button.id)
 
@@ -502,19 +578,28 @@ class ButtonStore:
         removed_ids: List[str] = []
 
         def mutator(model: ButtonsModel) -> None:
-            targets = [btn_id for btn_id, btn in model.buttons.items() if btn.text == text]
+            targets = [
+                btn_id for btn_id, btn in model.buttons.items() if btn.text == text
+            ]
             if not targets:
                 return
             for btn_id in targets:
                 removed_ids.append(btn_id)
                 model.buttons.pop(btn_id, None)
             for menu in model.menus.values():
-                menu.items = [btn_id for btn_id in menu.items if btn_id not in removed_ids]
+                menu.items = [
+                    btn_id for btn_id in menu.items if btn_id not in removed_ids
+                ]
 
         await self.modify(mutator)
         return bool(removed_ids)
 
     def generate_id(self, entity_type: str) -> str:
-        prefix_map = {"button": "btn", "menu": "menu", "action": "action", "webapp": "webapp"}
+        prefix_map = {
+            "button": "btn",
+            "menu": "menu",
+            "action": "action",
+            "webapp": "webapp",
+        }
         prefix = prefix_map.get(entity_type, entity_type)
         return _generate_id(prefix)

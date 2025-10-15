@@ -25,7 +25,7 @@ class WebUIServer:
         data_store,
         action_executor,
         action_registry,
-        modular_action_registry, # 新增
+        modular_action_registry,  # 新增
         host: str,
         port: int,
         auth_token: str = "",
@@ -89,16 +89,18 @@ class WebUIServer:
 
             # 任何非 /api/ 开头的路径都被视为页面或静态文件，是公开的。
             # 保护逻辑将由前端 JavaScript 处理。
-            if not path.startswith('/api/'):
+            if not path.startswith("/api/"):
                 return await handler(request)
 
             # 从这里开始，处理的是 API 请求。
             token = request.headers.get("X-Auth-Token")
 
             # /api/health 是一个特殊端点，用于登录页面检查令牌有效性。
-            if path == '/api/health':
+            if path == "/api/health":
                 if token == self._auth_token:
-                    return await handler(request) # 令牌正确，返回 {'status': 'ok'} 和 200 状态码
+                    return await handler(
+                        request
+                    )  # 令牌正确，返回 {'status': 'ok'} 和 200 状态码
                 # 如果令牌错误或缺失，返回 401。登录页面会处理此情况。
                 return self._json_response({"error": "unauthorized"}, status=401)
 
@@ -108,6 +110,7 @@ class WebUIServer:
 
             # 令牌有效，继续处理 API 请求。
             return await handler(request)
+
         return middleware_handler
 
     def _setup_routes(self, app: "web.Application") -> None:
@@ -116,16 +119,30 @@ class WebUIServer:
         app.router.add_get("/", self._handle_index)
         app.router.add_get("/api/state", self._handle_get_state)
         app.router.add_put("/api/state", self._handle_put_state)
-        app.router.add_get("/api/actions/local/available", self._handle_get_local_actions)
-        app.router.add_get("/api/actions/modular/available", self._handle_get_modular_actions)
-        app.router.add_post("/api/actions/modular/upload", self._handle_upload_modular_action) # 新增上传路由
-        app.router.add_get("/api/actions/modular/download/{action_id}", self._handle_download_modular_action) # 新增下载路由
+        app.router.add_get(
+            "/api/actions/local/available", self._handle_get_local_actions
+        )
+        app.router.add_get(
+            "/api/actions/modular/available", self._handle_get_modular_actions
+        )
+        app.router.add_post(
+            "/api/actions/modular/upload", self._handle_upload_modular_action
+        )  # 新增上传路由
+        app.router.add_get(
+            "/api/actions/modular/download/{action_id}",
+            self._handle_download_modular_action,
+        )  # 新增下载路由
+        app.router.add_delete(
+            "/api/actions/modular/{action_id}", self._handle_delete_modular_action
+        )  # 新增删除路由
         app.router.add_post("/api/actions/test", self._handle_test_action)
         app.router.add_post("/api/util/ids", self._handle_generate_id)
         app.router.add_get("/api/workflows", self._handle_get_all_workflows)
         app.router.add_get("/api/workflows/{workflow_id}", self._handle_get_workflow)
         app.router.add_put("/api/workflows/{workflow_id}", self._handle_put_workflow)
-        app.router.add_delete("/api/workflows/{workflow_id}", self._handle_delete_workflow)
+        app.router.add_delete(
+            "/api/workflows/{workflow_id}", self._handle_delete_workflow
+        )
         app.router.add_static("/static/", path=self._webui_dir, name="static")
 
     async def _handle_health(self, _request: "web.Request") -> "web.Response":
@@ -135,13 +152,17 @@ class WebUIServer:
         index_path = self._webui_dir / "index.html"
         if not index_path.is_file():
             return self._json_response({"error": "WebUI not found"}, status=404)
-        return web.Response(text=index_path.read_text("utf-8"), content_type="text/html")
+        return web.Response(
+            text=index_path.read_text("utf-8"), content_type="text/html"
+        )
 
     async def _handle_login_page(self, _request: "web.Request") -> "web.Response":
         login_path = self._webui_dir / "login.html"
         if not login_path.is_file():
             return self._json_response({"error": "Login page not found"}, status=404)
-        return web.Response(text=login_path.read_text("utf-8"), content_type="text/html")
+        return web.Response(
+            text=login_path.read_text("utf-8"), content_type="text/html"
+        )
 
     async def _handle_get_state(self, _request: "web.Request") -> "web.Response":
         snapshot = await self._store.get_snapshot()
@@ -161,7 +182,9 @@ class WebUIServer:
             return self._json_response({"error": f"写入失败: {exc}"}, status=400)
         return self._json_response(snapshot.to_dict())
 
-    async def _handle_get_all_workflows(self, _request: "web.Request") -> "web.Response":
+    async def _handle_get_all_workflows(
+        self, _request: "web.Request"
+    ) -> "web.Response":
         snapshot = await self._store.get_snapshot()
         workflows_dict = {
             workflow_id: workflow.to_dict()
@@ -178,7 +201,9 @@ class WebUIServer:
         workflow = snapshot.workflows.get(workflow_id)
 
         if not workflow:
-            return self._json_response({"error": f"未找到工作流 '{workflow_id}'"}, status=404)
+            return self._json_response(
+                {"error": f"未找到工作流 '{workflow_id}'"}, status=404
+            )
 
         return self._json_response(workflow.to_dict())
 
@@ -198,7 +223,9 @@ class WebUIServer:
             snapshot = await self._store.get_snapshot()
             new_model_dict = snapshot.to_dict()
 
-            if "workflows" not in new_model_dict or not isinstance(new_model_dict["workflows"], dict):
+            if "workflows" not in new_model_dict or not isinstance(
+                new_model_dict["workflows"], dict
+            ):
                 new_model_dict["workflows"] = {}
 
             new_model_dict["workflows"][workflow_id] = payload
@@ -218,7 +245,10 @@ class WebUIServer:
             snapshot = await self._store.get_snapshot()
             new_model_dict = snapshot.to_dict()
 
-            if "workflows" in new_model_dict and workflow_id in new_model_dict["workflows"]:
+            if (
+                "workflows" in new_model_dict
+                and workflow_id in new_model_dict["workflows"]
+            ):
                 del new_model_dict["workflows"][workflow_id]
                 await self._store.replace_with(new_model_dict)
         except Exception as exc:
@@ -226,7 +256,6 @@ class WebUIServer:
             return self._json_response({"error": f"删除失败: {exc}"}, status=500)
 
         return web.Response(status=204, headers=self._cors_headers)
-
 
     async def _handle_generate_id(self, request: "web.Request") -> "web.Response":
         try:
@@ -237,7 +266,9 @@ class WebUIServer:
         new_id = self._store.generate_id(entity_type)
         return self._json_response({"id": new_id})
 
-    async def _handle_get_local_actions(self, _request: "web.Request") -> "web.Response":
+    async def _handle_get_local_actions(
+        self, _request: "web.Request"
+    ) -> "web.Response":
         actions = self._registry.get_all()
         formatted_actions = [
             {
@@ -249,7 +280,9 @@ class WebUIServer:
         ]
         return self._json_response({"actions": formatted_actions})
 
-    async def _handle_get_modular_actions(self, _request: "web.Request") -> "web.Response":
+    async def _handle_get_modular_actions(
+        self, _request: "web.Request"
+    ) -> "web.Response":
         actions = self._modular_registry.get_all()
         formatted_actions = [
             {
@@ -262,9 +295,19 @@ class WebUIServer:
             }
             for action in actions
         ]
-        return self._json_response({"actions": formatted_actions})
+        secure_upload_enabled = bool(
+            self._plugin.settings.get("secure_script_upload_password")
+        )
+        return self._json_response(
+            {
+                "actions": formatted_actions,
+                "secure_upload_enabled": secure_upload_enabled,
+            }
+        )
 
-    async def _handle_download_modular_action(self, request: "web.Request") -> "web.Response":
+    async def _handle_download_modular_action(
+        self, request: "web.Request"
+    ) -> "web.Response":
         """处理模块化动作 .py 文件的下载请求。"""
         action_id = request.match_info.get("action_id")
         if not action_id:
@@ -272,7 +315,9 @@ class WebUIServer:
 
         action = self._modular_registry.get(action_id)
         if not action or not action.source_file.is_file():
-            return self._json_response({"error": f"未找到 ID 为 '{action_id}' 的动作文件"}, status=404)
+            return self._json_response(
+                {"error": f"未找到 ID 为 '{action_id}' 的动作文件"}, status=404
+            )
 
         try:
             return web.Response(
@@ -284,23 +329,53 @@ class WebUIServer:
                 },
             )
         except Exception as exc:
-            self._logger.error(f"读取动作文件 {action.source_file} 失败: {exc}", exc_info=True)
+            self._logger.error(
+                f"读取动作文件 {action.source_file} 失败: {exc}", exc_info=True
+            )
             return self._json_response({"error": f"读取文件失败: {exc}"}, status=500)
 
-    async def _handle_upload_modular_action(self, request: "web.Request") -> "web.Response":
+    async def _handle_upload_modular_action(
+        self, request: "web.Request"
+    ) -> "web.Response":
         """处理上传新的模块化动作 .py 文件。"""
+        if not self._plugin.settings.get("allow_script_uploads"):
+            return self._json_response(
+                {
+                    "error": "脚本上传功能已被管理员禁用。如需启用，请在配置文件中设置 'allow_script_uploads': true。"
+                },
+                status=403,
+            )
+
         try:
             payload = await request.json()
             filename = payload.get("filename")
             content = payload.get("content")
 
-            if not filename or not isinstance(filename, str) or not content or not isinstance(content, str):
-                return self._json_response({"error": "请求体缺少 filename 或 content 字段"}, status=400)
+            # 新增：检查二级上传密码
+            secure_password = self._plugin.settings.get("secure_script_upload_password")
+            if secure_password:
+                upload_password = payload.get("upload_password")
+                if upload_password != secure_password:
+                    return self._json_response(
+                        {"error": "上传密码错误或缺失。"}, status=403
+                    )
+
+            if (
+                not filename
+                or not isinstance(filename, str)
+                or not content
+                or not isinstance(content, str)
+            ):
+                return self._json_response(
+                    {"error": "请求体缺少 filename 或 content 字段"}, status=400
+                )
 
             # 安全性：清理文件名以防止路径遍历
             safe_filename = Path(filename).name
             if not safe_filename.endswith(".py"):
-                 return self._json_response({"error": "无效的文件类型，只允许上传 .py 文件"}, status=400)
+                return self._json_response(
+                    {"error": "无效的文件类型，只允许上传 .py 文件"}, status=400
+                )
 
             actions_dir = self._modular_registry._actions_dir
             target_path = actions_dir / safe_filename
@@ -319,6 +394,59 @@ class WebUIServer:
             self._logger.error(f"上传模块化动作失败: {exc}", exc_info=True)
             return self._json_response({"error": f"上传失败: {exc}"}, status=500)
 
+    async def _handle_delete_modular_action(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        """处理删除模块化动作的请求。"""
+        action_id = request.match_info.get("action_id")
+        if not action_id:
+            return self._json_response({"error": "缺少 action_id"}, status=400)
+
+        # 检查是否允许此操作（与上传使用相同的设置）
+        if not self._plugin.settings.get("allow_script_uploads"):
+            return self._json_response(
+                {"error": "脚本管理功能已被管理员禁用。"}, status=403
+            )
+
+        try:
+            # 安全性：检查二级密码
+            secure_password = self._plugin.settings.get("secure_script_upload_password")
+            if secure_password:
+                try:
+                    payload = await request.json()
+                    upload_password = payload.get("upload_password")
+                except Exception:
+                    return self._json_response(
+                        {"error": "需要提供上传密码。"}, status=400
+                    )
+
+                if upload_password != secure_password:
+                    return self._json_response(
+                        {"error": "上传密码错误或缺失。"}, status=403
+                    )
+
+            action = self._modular_registry.get(action_id)
+            if not action or not action.source_file or not action.source_file.is_file():
+                return self._json_response(
+                    {"error": f"未找到 ID 为 '{action_id}' 的动作文件"}, status=404
+                )
+
+            # 删除文件
+            action.source_file.unlink()
+            self._logger.info(f"模块化动作文件已删除: {action.source_file}")
+
+            # 重新加载动作
+            await self._modular_registry.scan_and_load_actions()
+            self._logger.info("模块化动作已重新加载。")
+
+            return self._json_response({"status": "ok", "deleted_id": action_id})
+
+        except Exception as exc:
+            self._logger.error(
+                f"删除模块化动作 '{action_id}' 失败: {exc}", exc_info=True
+            )
+            return self._json_response({"error": f"删除失败: {exc}"}, status=500)
+
     async def _handle_test_action(self, request: "web.Request") -> "web.Response":
         try:
             payload = await request.json()
@@ -335,7 +463,9 @@ class WebUIServer:
         elif action_id:
             action_obj = snapshot.actions.get(action_id)
             if not action_obj:
-                return self._json_response({"error": f"未找到动作 {action_id}"}, status=404)
+                return self._json_response(
+                    {"error": f"未找到动作 {action_id}"}, status=404
+                )
             action_dict = action_obj.to_dict()
         else:
             return self._json_response({"error": "缺少动作定义。"}, status=400)
@@ -348,10 +478,17 @@ class WebUIServer:
         elif button_id:
             button_obj = snapshot.buttons.get(button_id)
             if not button_obj:
-                return self._json_response({"error": f"未找到按钮 {button_id}"}, status=404)
+                return self._json_response(
+                    {"error": f"未找到按钮 {button_id}"}, status=404
+                )
             button_dict = button_obj.to_dict()
         else:
-            button_dict = {"id": "test_button", "text": "测试按钮", "type": "action", "payload": {}}
+            button_dict = {
+                "id": "test_button",
+                "text": "测试按钮",
+                "type": "action",
+                "payload": {},
+            }
 
         menu_payload = payload.get("menu")
         menu_id = payload.get("menu_id")
@@ -361,10 +498,17 @@ class WebUIServer:
         elif menu_id:
             menu_obj = snapshot.menus.get(menu_id)
             if not menu_obj:
-                return self._json_response({"error": f"未找到菜单 {menu_id}"}, status=404)
+                return self._json_response(
+                    {"error": f"未找到菜单 {menu_id}"}, status=404
+                )
             menu_dict = menu_obj.to_dict()
         else:
-            menu_dict = {"id": "test_menu", "name": "测试菜单", "items": [button_dict["id"]], "header": "测试"}
+            menu_dict = {
+                "id": "test_menu",
+                "name": "测试菜单",
+                "items": [button_dict["id"]],
+                "header": "测试",
+            }
 
         runtime_payload = payload.get("runtime") or {}
         variables = runtime_payload.get("variables") or {}

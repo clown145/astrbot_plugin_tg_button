@@ -9,12 +9,13 @@ from typing import Any, Callable, Dict, List, Optional
 @dataclass
 class ModularAction:
     """代表一个从文件中加载并经过验证的模块化动作。"""
+
     id: str
     name: str
     description: str
     inputs: List[Dict[str, Any]]
     outputs: List[Dict[str, Any]]
-    execute: Callable[..., Any] # 异步的 execute 函数
+    execute: Callable[..., Any]  # 异步的 execute 函数
     source_file: Path
 
 
@@ -68,15 +69,19 @@ class ModularActionRegistry:
 
                 if not isinstance(metadata, dict):
                     raise ValueError("未找到或 ACTION_METADATA 不是一个字典。")
-                if not callable(execute_func) or not inspect.iscoroutinefunction(execute_func):
+                if not callable(execute_func) or not inspect.iscoroutinefunction(
+                    execute_func
+                ):
                     raise ValueError("未找到或 execute 不是一个 async 函数。")
 
                 action_id = metadata.get("id")
                 if not action_id or not isinstance(action_id, str):
-                     raise ValueError("ACTION_METADATA 中缺少 'id' 或 'id' 类型不正确。")
+                    raise ValueError("ACTION_METADATA 中缺少 'id' 或 'id' 类型不正确。")
 
                 if action_id in self._actions:
-                    self._logger.warning(f"动作 ID '{action_id}' 冲突。文件 '{file_path}' 将覆盖来自 '{self._actions[action_id].source_file}' 的动作。")
+                    self._logger.warning(
+                        f"动作 ID '{action_id}' 冲突。文件 '{file_path}' 将覆盖来自 '{self._actions[action_id].source_file}' 的动作。"
+                    )
 
                 loaded_action = ModularAction(
                     id=action_id,
@@ -88,9 +93,13 @@ class ModularActionRegistry:
                     source_file=file_path,
                 )
                 self._actions[action_id] = loaded_action
-                self._logger.info(f"成功加载模块化动作 '{action_id}' 从 {file_path.name}")
+                self._logger.info(
+                    f"成功加载模块化动作 '{action_id}' 从 {file_path.name}"
+                )
 
             except Exception as e:
-                self._logger.error(f"加载模块化动作文件 {file_path.name} 失败: {e}", exc_info=True)
+                self._logger.error(
+                    f"加载模块化动作文件 {file_path.name} 失败: {e}", exc_info=True
+                )
 
         self._logger.info(f"模块化动作扫描完成。共加载 {len(self._actions)} 个动作。")

@@ -41,7 +41,26 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // --- 节点面板逻辑 ---
     let allAvailableActions = {};
-    const populateNodePalette = (actions) => {
+
+    const escapeHTML = (str) => {
+        if (!str) return '';
+        return str.toString().replace(/[&<>"']/g, (match) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[match]));
+    };
+
+    const truncate = (str, maxLength) => {
+        if (!str || str.length <= maxLength) {
+            return str;
+        }
+        return str.substring(0, maxLength) + '...';
+    };
+
+    const populateNodePalette = (actions, isSecureUploadEnabled = false) => {
         allAvailableActions = actions; // 存储所有可用动作，供 loadWorkflow 使用
         if (!nodePalette) return;
         nodePalette.innerHTML = ''; // 清空
@@ -54,38 +73,121 @@ window.addEventListener('DOMContentLoaded', () => {
         // 仅筛选模块化动作
         const modularActions = Object.entries(actions).filter(([_, action]) => action.isModular);
 
-        if (modularActions.length === 0) {
-            nodePalette.innerHTML = '<p class="muted">没有可用的模块化动作。</p>';
-            return;
-        }
-
         const createNodeElement = (actionId, action) => {
             const nodeElement = document.createElement('div');
             nodeElement.className = 'palette-node';
             nodeElement.draggable = true;
 
-            // 为节点构建富 HTML，包括模块化动作的端口
             let nodeTitleHTML = `
               <div style="display: flex; justify-content: space-between; align-items: center;">
-                <strong>${action.name || actionId}</strong>
-                <a href="/api/actions/modular/download/${action.id}" download="${action.filename || (action.id + '.py')}" class="secondary" style="font-size: 0.8em; padding: 2px 6px; text-decoration: none;">下载</a>
+                <strong>${escapeHTML(action.name || actionId)}</strong>
+                <div class="node-actions" style="display: flex; align-items: center; gap: 8px;">
+                    <a href="/api/actions/modular/download/${action.id}" download="${escapeHTML(action.filename || (action.id + '.py'))}" class="secondary node-action-btn download-action-btn" title="下载" style="text-decoration: none; font-size: 1.1em; line-height: 1;">&#x2B07;</a>
+                    <a href="#" class="secondary node-action-btn delete-action-btn" data-action-id="${action.id}" data-action-name="${action.name || actionId}" title="删除" style="text-decoration: none; font-size: 1.1em; line-height: 1; color: var(--danger-primary);">&#x1F5D1;</a>
+                </div>
               </div>
             `;
+
             let nodeHTML = nodeTitleHTML;
             if (action.isModular) {
-                const inputsHTML = (action.inputs || []).map(input => `<div class="port-label">- ${input.name} (in)</div>`).join('');
-                const outputsHTML = (action.outputs || []).map(output => `<div class="port-label">- ${output.name} (out)</div>`).join('');
+                const inputsHTML = (action.inputs || []).map(input => `<div class="port-label">- ${escapeHTML(input.name)} (in)</div>`).join('');
+                const outputsHTML = (action.outputs || []).map(output => `<div class="port-label">- ${escapeHTML(output.name)} (out)</div>`).join('');
                 nodeHTML += `<div class="node-ports">${inputsHTML}${outputsHTML}</div>`;
             }
-            nodeHTML += `<p>${action.description || '无描述'}</p>`;
+            nodeHTML += `<p>${escapeHTML(action.description || '无描述')}</p>`;
             nodeElement.innerHTML = nodeHTML;
 
+            // Drag start listener
             nodeElement.addEventListener('dragstart', (event) => {
+                if (event.target.closest('.node-action-btn')) {
+                    event.preventDefault();
+                    return;
+                }
                 if (event.dataTransfer) {
-                    // 传递完整的动作对象，以便在放置时获取输入/输出信息
                     event.dataTransfer.setData('text/plain', JSON.stringify(action));
                 }
             });
+
+            // Download button listener
+            const downloadBtn = nodeElement.querySelector('.download-action-btn');
+            if (downloadBtn) {
+                downloadBtn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const url = downloadBtn.href;
+                    const filename = downloadBtn.getAttribute('download');
+
+                    try {
+                        const response = await fetchWithAuth(url);
+                        const blob = await response.blob();
+
+                        const tempLink = document.createElement('a');
+                        tempLink.href = URL.createObjectURL(blob);
+                        tempLink.setAttribute('download', filename);
+                        document.body.appendChild(tempLink);
+                        tempLink.click();
+                        document.body.removeChild(tempLink);
+                        URL.revokeObjectURL(tempLink.href);
+
+                    } catch (error) {
+                        console.error('下载动作文件失败:', error);
+                        window.showInfoModal(`下载文件失败: ${error.message}`, true);
+                    }
+                });
+            }
+
+            // Delete button listener
+            const deleteBtn = nodeElement.querySelector('.delete-action-btn');
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const actionIdToDelete = deleteBtn.dataset.actionId;
+                    const actionNameToDelete = deleteBtn.dataset.actionName;
+
+                    const deleteAction = () => {
+                        const performDelete = async (password) => {
+                            try {
+                                const fetchOptions = {
+                                    method: 'DELETE',
+                                    headers: { 'Content-Type': 'application/json' },
+                                };
+                                if (isSecureUploadEnabled) {
+                                    fetchOptions.body = JSON.stringify({ upload_password: password });
+                                }
+
+                                await fetchWithAuth(`/api/actions/modular/${actionIdToDelete}`, fetchOptions);
+                                window.showInfoModal(`动作 '${actionNameToDelete}' 已删除。页面将刷新。`);
+                                setTimeout(() => window.location.reload(), 1500);
+                            } catch (error) {
+                                console.error('删除动作失败:', error);
+                                window.showInfoModal(`删除失败: ${error.message}`, true);
+                            }
+                        };
+
+                        if (isSecureUploadEnabled) {
+                            window.showInputModal(
+                                '需要密码',
+                                '服务器已启用安全密码，请输入密码以删除:',
+                                'password',
+                                '请输入密码...',
+                                performDelete,
+                                () => { console.log('删除操作已取消。'); }
+                            );
+                        } else {
+                            performDelete();
+                        }
+                    };
+
+                    window.showConfirmModal(
+                        '确认删除',
+                        `您确定要永久删除模块化动作 “${actionNameToDelete}” 吗？<br><br>此操作无法撤销。`,
+                        deleteAction
+                    );
+                });
+            }
 
             return nodeElement;
         };
@@ -93,7 +195,6 @@ window.addEventListener('DOMContentLoaded', () => {
         const modularHeader = document.createElement('h4');
         modularHeader.textContent = '模块化动作';
 
-        // --- 上传按钮 ---
         const uploadBtn = document.createElement('button');
         uploadBtn.textContent = '上传';
         uploadBtn.className = 'secondary';
@@ -113,45 +214,59 @@ window.addEventListener('DOMContentLoaded', () => {
             if (!file) return;
 
             const reader = new FileReader();
-            reader.onload = async (e) => {
+            reader.onload = (e) => {
                 const content = e.target.result;
-                try {
-                    const response = await fetchWithAuth('/api/actions/modular/upload', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ filename: file.name, content })
-                    });
-                    if (!response.ok) {
-                        const err = await response.json();
-                        throw new Error(err.error || '上传失败');
-                    }
-                    window.showInfoModal(`动作 '${file.name}' 上传成功！`);
-                    // 刷新面板
-                    const actionsResponse = await fetchWithAuth('/api/actions/modular/available');
-                    const actionsData = await actionsResponse.json();
-                    // main.js 也会获取本地动作，我们需要合并它们
-                    const localActionsResponse = await fetchWithAuth('/api/actions/local/available');
-                    const localActionsData = await localActionsResponse.json();
 
-                    const combinedActions = { ...actionsData.actions, ...localActionsData.actions };
-                    window.tgButtonEditor.refreshPalette(combinedActions);
-                } catch (error) {
-                    console.error('上传动作失败:', error);
-                    window.showInfoModal(`上传失败: ${error.message}`, true);
+                const performUpload = async (password) => {
+                    const payload = { filename: file.name, content };
+                    if (isSecureUploadEnabled) {
+                        payload.upload_password = password;
+                    }
+
+                    try {
+                        await fetchWithAuth('/api/actions/modular/upload', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        window.showInfoModal(`动作 '${file.name}' 上传成功！页面将刷新以同步。`);
+                        setTimeout(() => window.location.reload(), 1500);
+                    } catch (error) {
+                        console.error('上传动作失败:', error);
+                        window.showInfoModal(`上传失败: ${error.message}`, true);
+                    }
+                };
+
+                if (isSecureUploadEnabled) {
+                    window.showInputModal(
+                        '需要密码',
+                        '服务器已启用上传密码，请输入密码以上传:',
+                        'password',
+                        '请输入密码...',
+                        performUpload,
+                        () => {
+                            event.target.value = ''; // 取消时清空文件输入
+                            console.log('上传操作已取消。');
+                        }
+                    );
+                } else {
+                    performUpload();
                 }
             };
             reader.readAsText(file);
-            // 重置输入值，以便可以再次上传相同的文件
-            event.target.value = '';
+            event.target.value = ''; // 立即清空，防止同一文件不触发change
         });
-        // --- 上传按钮结束 ---
 
         nodePalette.appendChild(modularHeader);
-        nodePalette.appendChild(fileInput); // 将隐藏的 input 添加到 DOM
+        nodePalette.appendChild(fileInput);
 
-        modularActions.forEach(([actionId, action]) => {
-            nodePalette.appendChild(createNodeElement(actionId, { ...action, id: actionId }));
-        });
+        if (modularActions.length === 0) {
+            nodePalette.innerHTML += '<p class="muted">没有可用的模块化动作。</p>';
+        } else {
+            modularActions.forEach(([actionId, action]) => {
+                nodePalette.appendChild(createNodeElement(actionId, { ...action, id: actionId }));
+            });
+        }
     };
 
     // --- 拖放逻辑 ---
@@ -170,12 +285,17 @@ window.addEventListener('DOMContentLoaded', () => {
                     const pos_y = event.clientY * (editor.precanvas.clientHeight / (editor.precanvas.clientHeight * editor.zoom)) - (editor.precanvas.getBoundingClientRect().y * (editor.precanvas.clientHeight / (editor.precanvas.clientHeight * editor.zoom)));
 
                     // 为画布上的节点构建更丰富的内部 HTML
-                    const inputsHTML = (action.inputs || []).map(input => `<div class="port-label port-label-in">${input.name}</div>`).join('');
-                    const outputsHTML = (action.outputs || []).map(output => `<div class="port-label port-label-out">${output.name}</div>`).join('');
+                    const inputsHTML = (action.inputs || []).map(input => `<div class="port-label port-label-in" title="${escapeHTML(input.name)}">${truncate(escapeHTML(input.name), 7)}</div>`).join('');
+                    const outputsHTML = (action.outputs || []).map(output => `<div class="port-label port-label-out" title="${escapeHTML(output.name)}">${truncate(escapeHTML(output.name), 7)}</div>`).join('');
 
                     const nodeContentHTML = `
-                        <div class="node-title">${action.name || action.id}</div>
-                        ${action.isModular ? `<div class="node-ports-container">${inputsHTML}${outputsHTML}</div>` : ''}
+                        <div class="node-title" title="${escapeHTML(action.name || action.id)}">${escapeHTML(action.name || action.id)}</div>
+                        ${action.isModular ? `
+                        <div class="ports-wrapper">
+                            <div class="input-ports">${inputsHTML}</div>
+                            <div class="output-ports">${outputsHTML}</div>
+                        </div>
+                        ` : ''}
                     `;
 
                     const internalNodeData = {
@@ -385,12 +505,17 @@ window.addEventListener('DOMContentLoaded', () => {
                 const numInputs = action.isModular ? (action.inputs || []).length : 1;
                 const numOutputs = action.isModular ? (action.outputs || []).length : 1;
 
-                const inputsHTML = (action.inputs || []).map(input => `<div class="port-label port-label-in">${input.name}</div>`).join('');
-                const outputsHTML = (action.outputs || []).map(output => `<div class="port-label port-label-out">${output.name}</div>`).join('');
+                const inputsHTML = (action.inputs || []).map(input => `<div class="port-label port-label-in" title="${escapeHTML(input.name)}">${truncate(escapeHTML(input.name), 7)}</div>`).join('');
+                const outputsHTML = (action.outputs || []).map(output => `<div class="port-label port-label-out" title="${escapeHTML(output.name)}">${truncate(escapeHTML(output.name), 7)}</div>`).join('');
 
                 const nodeContentHTML = `
-                    <div class="node-title">${action.name || action.id}</div>
-                    ${action.isModular ? `<div class="node-ports-container">${inputsHTML}${outputsHTML}</div>` : ''}
+                    <div class="node-title" title="${escapeHTML(action.name || action.id)}">${escapeHTML(action.name || action.id)}</div>
+                    ${action.isModular ? `
+                    <div class="ports-wrapper">
+                        <div class="input-ports">${inputsHTML}</div>
+                        <div class="output-ports">${outputsHTML}</div>
+                    </div>
+                    ` : ''}
                 `;
 
                 const internalNodeData = {
@@ -563,7 +688,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // --- 为主应用暴露的全局函数 ---
     window.tgButtonEditor = {
-        refreshPalette: (actions) => populateNodePalette(actions),
+        refreshPalette: (actions, isSecure) => populateNodePalette(actions, isSecure),
         refreshWorkflows: populateWorkflowSelector,
         saveCurrentWorkflow: () => saveWorkflow(true),
         updateNodeConfig: (nodeId, newData) => {

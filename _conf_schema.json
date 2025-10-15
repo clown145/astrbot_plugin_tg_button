@@ -33,5 +33,15 @@
     "description": "（可选）访问 WebUI 时需要携带的认证 Token，若为空则不校验。",
     "type": "string",
     "default": ""
+  },
+  "allow_script_uploads": {
+    "description": "是否允许通过 WebUI 上传模块化动作脚本 (.py 文件)。出于安全考虑，默认为 false。",
+    "type": "bool",
+    "default": false
+  },
+  "secure_script_upload_password": {
+    "description": "（可选）当允许上传脚本时，设置一个额外的上传密码以增加安全性。若为空，则不校验。",
+    "type": "string",
+    "default": ""
   }
 }

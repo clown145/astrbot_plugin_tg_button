@@ -1,6 +1,7 @@
 """
 astrbot_plugin_tg_button 插件的配置加载与管理。
 """
+
 import json
 from pathlib import Path
 from typing import Any, Dict
@@ -18,7 +19,10 @@ CONFIG_DEFAULTS: Dict[str, Any] = {
     "webui_host": "127.0.0.1",
     "webui_exclusive": True,
     "webui_auth_token": "",
+    "allow_script_uploads": False,
+    "secure_script_upload_password": "",
 }
+
 
 def _load_raw_config() -> Dict[str, Any]:
     """从磁盘加载原始配置文件。"""
@@ -70,14 +74,38 @@ def build_settings(raw: Dict[str, Any]) -> Dict[str, Any]:
     if raw:
         settings.update(raw)
 
-    settings["menu_command"] = _ensure_string(settings.get("menu_command"), CONFIG_DEFAULTS["menu_command"])
-    settings["menu_header_text"] = _ensure_string(settings.get("menu_header_text"), CONFIG_DEFAULTS["menu_header_text"])
-    settings["webui_enabled"] = _coerce_bool(raw.get("webui_enabled", settings.get("webui_enabled")), CONFIG_DEFAULTS["webui_enabled"])
-    settings["webui_port"] = _coerce_int(settings.get("webui_port"), CONFIG_DEFAULTS["webui_port"])
-    settings["webui_host"] = _ensure_string(settings.get("webui_host"), CONFIG_DEFAULTS["webui_host"])
-    settings["webui_exclusive"] = _coerce_bool(raw.get("webui_exclusive", settings.get("webui_exclusive")), CONFIG_DEFAULTS["webui_exclusive"])
-    settings["webui_auth_token"] = _ensure_string(settings.get("webui_auth_token"), CONFIG_DEFAULTS["webui_auth_token"])
+    settings["menu_command"] = _ensure_string(
+        settings.get("menu_command"), CONFIG_DEFAULTS["menu_command"]
+    )
+    settings["menu_header_text"] = _ensure_string(
+        settings.get("menu_header_text"), CONFIG_DEFAULTS["menu_header_text"]
+    )
+    settings["webui_enabled"] = _coerce_bool(
+        raw.get("webui_enabled", settings.get("webui_enabled")),
+        CONFIG_DEFAULTS["webui_enabled"],
+    )
+    settings["webui_port"] = _coerce_int(
+        settings.get("webui_port"), CONFIG_DEFAULTS["webui_port"]
+    )
+    settings["webui_host"] = _ensure_string(
+        settings.get("webui_host"), CONFIG_DEFAULTS["webui_host"]
+    )
+    settings["webui_exclusive"] = _coerce_bool(
+        raw.get("webui_exclusive", settings.get("webui_exclusive")),
+        CONFIG_DEFAULTS["webui_exclusive"],
+    )
+    settings["webui_auth_token"] = _ensure_string(
+        settings.get("webui_auth_token"), CONFIG_DEFAULTS["webui_auth_token"]
+    )
+    settings["allow_script_uploads"] = _coerce_bool(
+        settings.get("allow_script_uploads"), CONFIG_DEFAULTS["allow_script_uploads"]
+    )
+    settings["secure_script_upload_password"] = _ensure_string(
+        settings.get("secure_script_upload_password"),
+        CONFIG_DEFAULTS["secure_script_upload_password"],
+    )
     return settings
+
 
 # 在模块导入时加载初始设置，以便装饰器可以使用 MENU_COMMAND。
 # 这部分代码仅在模块首次导入时执行一次。

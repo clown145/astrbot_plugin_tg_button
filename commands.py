@@ -1,6 +1,7 @@
 """
 tg_button 插件的命令处理逻辑。
 """
+
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
@@ -60,4 +61,3 @@ async def send_menu(plugin: "DynamicButtonFrameworkPlugin", event: AstrMessageEv
         yield event.plain_result("发送菜单时出错，请查看后台日志。")
         return
     event.stop_event()
-

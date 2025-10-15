@@ -390,13 +390,19 @@ textarea {
 .drawflow-node {
   background: var(--bg-tertiary) !important;
   color: var(--fg-primary) !important;
-  border: 1px solid var(--border-color) !important;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4) !important;
+  border: 2px solid var(--accent-secondary) !important; /* Softer green border */
+  box-shadow: 0 0 8px rgba(0, 255, 127, 0.2) !important; /* Softer greenish glow */
+  border-radius: 8px !important; /* Rounded corners */
 }
 
 .drawflow-node .title-box {
   background: var(--bg-secondary) !important;
   color: var(--accent-primary) !important;
+}
+
+/* --- Custom Port Colors --- */
+.drawflow .drawflow-node .input {
+  background: var(--accent-primary) !important; /* Change input to green */
 }
 
 .drawflow-node .box {
@@ -463,3 +469,112 @@ input:checked + .slider:before {
 .field.checkbox-field {
     grid-template-columns: 1fr max-content;
 }
+
+/* Action buttons in node palette */
+.node-action-btn {
+  text-decoration: none;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background-color 0.2s, color 0.2s;
+  color: var(--fg-secondary);
+}
+
+.node-action-btn:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--fg-primary);
+}
+
+.delete-action-btn:hover {
+    background-color: var(--danger-primary);
+    color: #fff;
+}
+
+/* Input field in modal */
+.modal-input {
+    width: 100%;
+    margin-top: 12px;
+    background-color: var(--bg-primary);
+    color: var(--fg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 16px;
+    box-sizing: border-box;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.modal-input:focus {
+    border-color: var(--accent-primary);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(0, 255, 127, 0.2);
+}
+
+/* Custom styles for workflow node ports */
+.drawflow-node.workflow-node .drawflow_content_node {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 0 !important; /* Override default padding */
+}
+
+
+.drawflow-node.workflow-node .node-title {
+    background: var(--bg-secondary);
+    text-align: center;
+    flex-shrink: 0;
+    /* --- Add rounded corners to match the node --- */
+    border-radius: 6px 6px 0 0;
+    /* --- Always Visible, Fixed Height --- */
+    padding: 0 8px;
+    height: 30px;
+    line-height: 30px;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--accent-primary);
+}
+
+.drawflow-node.workflow-node:hover .node-title {
+    /* No size change on hover */
+}
+
+
+.drawflow-node.workflow-node .ports-wrapper {
+    flex-grow: 1;
+    display: flex;
+    justify-content: space-between;
+    overflow: hidden;
+}
+
+.drawflow-node.workflow-node .input-ports,
+.drawflow-node.workflow-node .output-ports {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-evenly;
+    padding: 5px 0;
+}
+
+.drawflow-node.workflow-node .port-label {
+    padding: 0 15px;
+    font-size: 12px; /* Reduced font size */
+    color: var(--fg-secondary);
+    white-space: nowrap;
+    max-width: 120px; /* Add max width to enable truncation */
+    /* --- Text Overflow --- */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* --- Precise Sizing --- */
+    height: 25px;
+    line-height: 25px;
+}
+
+.drawflow-node.workflow-node .port-label-out {
+    text-align: right;
+}
+
+.drawflow-node.workflow-node .port-label-in {
+    text-align: left;
+}
+
+

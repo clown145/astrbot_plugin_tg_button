@@ -8,17 +8,18 @@ ACTION_METADATA = {
             "name": "text",
             "type": "string",
             "description": "要显示的通知内容。",
-            "default": "操作成功"
+            "default": "操作成功",
         },
         {
             "name": "show_alert",
             "type": "boolean",
             "description": "是否使用会强制用户确认的‘警报’样式。默认为否（短暂通知）。",
-            "default": False
-        }
+            "default": False,
+        },
     ],
-    "outputs": []
+    "outputs": [],
 }
+
 
 async def execute(text: str, show_alert: bool = False):
     """
@@ -28,9 +29,4 @@ async def execute(text: str, show_alert: bool = False):
     if not isinstance(text, str):
         text = str(text)
 
-    return {
-        "notification": {
-            "text": text,
-            "show_alert": bool(show_alert)
-        }
-    }
+    return {"notification": {"text": text, "show_alert": bool(show_alert)}}

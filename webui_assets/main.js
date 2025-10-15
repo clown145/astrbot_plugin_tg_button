@@ -11,6 +11,7 @@
     let state = { version: 2, menus: {}, buttons: {}, actions: {}, web_apps: {} };
     let modularActions = [];
     let localActions = [];
+    let isSecureUploadEnabled = false; // 新增：缓存密码启用状态
     let isClick = true;
 
     const menusContainer = document.getElementById('menusContainer');
@@ -48,6 +49,7 @@
     // --- 全局暴露模态框函数 ---
     window.showInfoModal = showInfoModal;
     window.showConfirmModal = showConfirmModal;
+    window.showInputModal = showInputModal;
 
     function showInfoModal(message, isError = false) {
         const body = document.createElement('p');
@@ -64,7 +66,7 @@
         openModal(isError ? '错误' : '通知', body, footer);
     }
 
-    function showConfirmModal(title, message, onConfirm) {
+    function showConfirmModal(title, message, onConfirm, onCancel) {
         const body = document.createElement('p');
         body.innerHTML = message.replace(/\n/g, '<br>');
 
@@ -74,18 +76,69 @@
         const cancelBtn = document.createElement('button');
         cancelBtn.textContent = '取消';
         cancelBtn.className = 'secondary';
-        cancelBtn.onclick = closeModal;
+        cancelBtn.onclick = () => {
+            closeModal();
+            if (onCancel) onCancel();
+        };
 
         const confirmBtn = document.createElement('button');
         confirmBtn.textContent = '确认';
         confirmBtn.className = 'danger';
         confirmBtn.onclick = () => {
             closeModal();
-            onConfirm();
+            if (onConfirm) onConfirm();
         };
 
         footer.append(cancelBtn, confirmBtn);
         openModal(title, body, footer);
+    }
+
+    function showInputModal(title, message, inputType = 'text', placeholder = '', onConfirm, onCancel) {
+        const body = document.createElement('div');
+        const messageEl = document.createElement('p');
+        messageEl.innerHTML = message.replace(/\n/g, '<br>');
+        body.appendChild(messageEl);
+
+        const input = document.createElement('input');
+        input.type = inputType;
+        input.placeholder = placeholder;
+        input.className = 'modal-input'; // For styling
+        input.style.width = 'calc(100% - 20px)'; // Account for padding
+        input.style.marginTop = '12px';
+        input.autocomplete = 'off';
+        body.appendChild(input);
+
+        const footer = document.createElement('div');
+        footer.style.cssText = "width: 100%; display: flex; justify-content: flex-end; gap: 12px;";
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = '取消';
+        cancelBtn.className = 'secondary';
+        cancelBtn.onclick = () => {
+            closeModal();
+            if (onCancel) onCancel();
+        };
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.textContent = '确认';
+        confirmBtn.onclick = () => {
+            const value = input.value;
+            closeModal();
+            if (onConfirm) onConfirm(value);
+        };
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                confirmBtn.click();
+            } else if (e.key === 'Escape') {
+                cancelBtn.click();
+            }
+        });
+
+        footer.append(cancelBtn, confirmBtn);
+        openModal(title, body, footer);
+
+        setTimeout(() => input.focus(), 50);
     }
 
     // --- API 和状态管理 ---
@@ -114,7 +167,7 @@
             api('/api/actions/modular/available').catch(err => {
                 console.error("获取模块化动作失败:", err);
                 showInfoModal("加载模块化动作列表失败，部分功能可能无法使用。", true);
-                return { actions: [] };
+                return { actions: [], secure_upload_enabled: false }; // 确保在失败时有默认值
             }),
             api('/api/actions/local/available').catch(err => {
                 console.error("获取本地动作失败:", err);
@@ -125,6 +178,7 @@
 
         state = { version: 2, menus: {}, buttons: {}, actions: {}, web_apps: {}, ...stateData };
         modularActions = modularActionsData.actions || [];
+        isSecureUploadEnabled = modularActionsData.secure_upload_enabled || false; // 保存从后端获取的状态
         localActions = localActionsData.actions || [];
         renderAll();
     }
@@ -182,7 +236,7 @@
                 };
             });
 
-            window.tgButtonEditor.refreshPalette(allActions);
+            window.tgButtonEditor.refreshPalette(allActions, isSecureUploadEnabled);
             window.tgButtonEditor.refreshWorkflows();
         }
 
@@ -313,60 +367,69 @@
             ghostClass: 'sortable-ghost',
             dragClass: 'sortable-drag',
             onEnd: (evt) => {
-                // 重构核心：不再全局扫描 DOM，而是精确更新受影响的菜单状态
+                // --- 新的、状态驱动的逻辑 ---
+                const buttonId = evt.item.dataset.buttonId;
+                if (!buttonId || !state.buttons[buttonId]) return;
+
                 const fromMenuId = evt.from.closest('.menu-layout-grid')?.dataset.menuId;
                 const toMenuId = evt.to.closest('.menu-layout-grid')?.dataset.menuId;
 
-                // 更新来源和目标菜单的状态。如果拖拽到“未分配区域”，toMenuId 会是 null。
-                if (fromMenuId) {
-                    updateMenuStateFromDOM(fromMenuId);
-                }
-                if (toMenuId && toMenuId !== fromMenuId) {
-                    updateMenuStateFromDOM(toMenuId);
+                // 核心逻辑: 拖拽结束后，根据 DOM 的最终状态，一次性地、精确地更新 state
+
+                // 1. 如果按钮从一个菜单中拖出，先从旧菜单的 state.items 中移除
+                if (fromMenuId && fromMenuId !== toMenuId) {
+                    if (state.menus[fromMenuId]) {
+                        state.menus[fromMenuId].items = state.menus[fromMenuId].items.filter(id => id !== buttonId);
+                    }
                 }
 
-                // 更新行外观（空/非空）
+                // 2. 如果按钮被拖入一个菜单，更新该菜单的整个 state
+                if (toMenuId) {
+                    const grid = evt.to.closest('.menu-layout-grid');
+                    const newButtonOrder = [];
+                    grid.querySelectorAll('.menu-layout-row').forEach((rowEl, rowIndex) => {
+                        rowEl.querySelectorAll('.menu-btn-wrapper').forEach((btnEl, colIndex) => {
+                            const btnId = btnEl.dataset.buttonId;
+                            if (btnId && state.buttons[btnId]) {
+                                state.buttons[btnId].layout.row = rowIndex;
+                                state.buttons[btnId].layout.col = colIndex;
+                                newButtonOrder.push(btnId);
+                            }
+                        });
+                    });
+                    state.menus[toMenuId].items = newButtonOrder;
+                } else {
+                    // 如果拖入“未分配”区域，清理其布局信息
+                    const button = state.buttons[buttonId];
+                    if(button) {
+                        delete button.layout.row;
+                        delete button.layout.col;
+                    }
+                }
+
+                // 3. 视觉更新和辅助逻辑
                 updateRowAppearance(evt.from);
                 updateRowAppearance(evt.to);
 
-                // 如果按钮被拖到菜单的最后一个空行，则自动添加一个新行
-                const grid = evt.to.closest('.menu-layout-grid');
-                if (grid) {
-                    const rows = grid.querySelectorAll('.menu-layout-row');
+                const toGrid = evt.to.closest('.menu-layout-grid');
+                if (toGrid) {
+                    const rows = toGrid.querySelectorAll('.menu-layout-row');
                     const lastRow = rows[rows.length - 1];
                     if (evt.to === lastRow && lastRow.querySelector('.menu-btn-wrapper')) {
-                        const newRow = createMenuRow([], grid.dataset.menuId, rows.length);
-                        grid.appendChild(newRow);
+                        const newRow = createMenuRow([], toGrid.dataset.menuId, rows.length);
+                        toGrid.appendChild(newRow);
                         initSortableForRow(newRow);
                     }
+                }
+
+                // 如果拖拽涉及“未分配”区域，需要重新渲染该区域以保证同步
+                if (!fromMenuId || !toMenuId) {
+                    renderUnassignedButtons();
                 }
             },
         });
     }
 
-    /**
-     * @description 根据 DOM 结构更新指定菜单的 state。
-     * 这是对旧的全局 updateStateFromDOM 的优化，只处理单个菜单，提高效率和健壮性。
-     * @param {string} menuId - 需要更新状态的菜单 ID。
-     */
-    function updateMenuStateFromDOM(menuId) {
-        const grid = document.querySelector(`.menu-layout-grid[data-menu-id="${menuId}"]`);
-        if (!grid || !state.menus[menuId]) return;
-
-        const newButtonOrder = [];
-        grid.querySelectorAll('.menu-layout-row').forEach((rowEl, rowIndex) => {
-            rowEl.querySelectorAll('.menu-btn-wrapper').forEach((btnEl, colIndex) => {
-                const btnId = btnEl.dataset.buttonId;
-                const button = state.buttons[btnId];
-                if (button) {
-                    button.layout.row = rowIndex;
-                    button.layout.col = colIndex;
-                    newButtonOrder.push(btnId);
-                }
-            });
-        });
-        state.menus[menuId].items = newButtonOrder;
-    }
 
     /**
      * @description 通用的列表项渲染函数，用于渲染 Actions 和 WebApps 列表，减少代码重复。
@@ -672,76 +735,101 @@
         const body = document.createElement('div');
         body.className = 'node-config-form';
 
-        const params = action.isModular ? action.inputs : (action.isLocal ? action.parameters : []);
+        const inputs = action.isModular ? action.inputs : (action.isLocal ? action.parameters : []);
+        const outputs = action.isModular ? (action.outputs || []) : [];
 
-        if (!params || params.length === 0) {
-            body.innerHTML = '<p class="muted">此节点没有可配置的参数。</p>';
+        if ((!inputs || inputs.length === 0) && (!outputs || outputs.length === 0)) {
+            body.innerHTML = '<p class="muted">此节点没有可配置或可查看的参数。</p>';
         } else {
-            params.forEach((param, index) => {
-                const paramName = param.name;
-                const paramLabel = `${param.name}${param.type ? ` (${param.type})` : ''}`;
-                const paramDescription = param.description || '';
-                const inputPortName = `input_${index + 1}`;
-                const isConnected = node.inputs[inputPortName] && node.inputs[inputPortName].connections.length > 0;
+            if (inputs && inputs.length > 0) {
+                const inputsHeader = document.createElement('h4');
+                inputsHeader.textContent = '输入参数';
+                inputsHeader.style.marginTop = '0';
+                body.appendChild(inputsHeader);
 
-                let field;
+                inputs.forEach((param, index) => {
+                    const paramName = param.name;
+                    const paramLabel = `${param.name}${param.type ? ` (${param.type})` : ''}`;
+                    const paramDescription = param.description || '';
+                    const inputPortName = `input_${index + 1}`;
+                    const isConnected = node.inputs[inputPortName] && node.inputs[inputPortName].connections.length > 0;
 
-                if (param.type === 'boolean') {
-                    field = document.createElement('div');
-                    field.className = 'field'; // 使用标准 'field' 类
-
-                    const label = document.createElement('label');
-                    label.textContent = paramLabel;
-                    field.appendChild(label);
-
-                    const switchWrapper = document.createElement('label');
-                    switchWrapper.className = 'switch-toggle';
-
-                    const value = isConnected ? false : (currentData[paramName] ?? (param.default ?? false));
-                    const input = createInput('checkbox', '', null);
-                    input.dataset.paramName = paramName;
-                    input.checked = !!value;
-                    input.disabled = isConnected;
-
-                    const slider = document.createElement('span');
-                    slider.className = 'slider';
-
-                    switchWrapper.append(input, slider);
-                    field.appendChild(switchWrapper);
-
+                    const inputContainer = document.createElement('div');
                     if (paramDescription) {
                         const descEl = document.createElement('p');
                         descEl.className = 'field-description muted';
+                        descEl.style.margin = '0 0 4px 0';
                         descEl.textContent = paramDescription;
-                        // 附加在开关之后，但在 field 包装器内部
-                        field.appendChild(descEl);
+                        inputContainer.appendChild(descEl);
+                    }
+
+                    let field;
+
+                    if (param.type === 'boolean') {
+                        const switchWrapper = document.createElement('label');
+                        switchWrapper.className = 'switch-toggle';
+                        const value = isConnected ? false : (currentData[paramName] ?? (param.default ?? false));
+                        const input = createInput('checkbox', '', null);
+                        input.dataset.paramName = paramName;
+                        input.checked = !!value;
+                        input.disabled = isConnected;
+                        const slider = document.createElement('span');
+                        slider.className = 'slider';
+                        switchWrapper.append(input, slider);
+                        inputContainer.appendChild(switchWrapper);
+
+                        field = document.createElement('div');
+                        field.className = 'field checkbox-field';
+                        const label = document.createElement('label');
+                        label.className = 'checkbox-label';
+                        label.textContent = paramLabel;
+                        field.appendChild(label);
+                        field.appendChild(inputContainer);
+
+                    } else {
+                        const value = isConnected ? '' : (currentData[paramName] ?? (param.default ?? ''));
+                        const placeholder = isConnected ? '值由上游节点提供' : (param.placeholder || '');
+                        const input = createTextarea(value, null);
+                        input.dataset.paramName = paramName;
+                        input.disabled = isConnected;
+                        input.placeholder = placeholder;
+                        inputContainer.appendChild(input);
+                        field = createField(paramLabel, inputContainer);
                     }
 
                     if (isConnected) {
-                         const connectedNotice = document.createElement('p');
+                        const connectedNotice = document.createElement('p');
                         connectedNotice.className = 'field-description muted';
+                        connectedNotice.style.margin = '4px 0 0 0';
                         connectedNotice.textContent = '值由上游节点提供';
-                        field.appendChild(connectedNotice);
+                        inputContainer.appendChild(connectedNotice);
                     }
-                } else {
-                    const value = isConnected ? '' : (currentData[paramName] ?? (param.default ?? ''));
-                    const placeholder = isConnected ? '值由上游节点提供' : '';
 
-                    const input = createTextarea(value, null);
-                    input.dataset.paramName = paramName;
-                    input.disabled = isConnected;
-                    input.placeholder = placeholder;
+                    body.appendChild(field);
+                });
+            }
 
-                    field = createField(paramLabel, input);
-                    if (paramDescription) {
-                        const descEl = document.createElement('p');
-                        descEl.className = 'field-description muted';
-                        descEl.textContent = paramDescription;
-                        field.appendChild(descEl);
-                    }
-                }
-                body.appendChild(field);
-            });
+            if (outputs && outputs.length > 0) {
+                const outputsHeader = document.createElement('h4');
+                outputsHeader.textContent = '输出端口';
+                outputsHeader.style.borderTop = '1px solid var(--border-color)';
+                outputsHeader.style.paddingTop = '12px';
+                outputsHeader.style.marginTop = '16px';
+                body.appendChild(outputsHeader);
+
+                outputs.forEach(output => {
+                    const outputContainer = document.createElement('div');
+                    const descEl = document.createElement('p');
+                    descEl.className = 'field-description muted';
+                    descEl.style.margin = '0';
+                    descEl.textContent = output.description || '无描述';
+                    outputContainer.appendChild(descEl);
+
+                    const field = createField(output.name, outputContainer);
+                    field.style.alignItems = 'flex-start';
+                    body.appendChild(field);
+                });
+            }
         }
 
         const footer = document.createElement('div');
@@ -869,6 +957,7 @@
         const targetLink = e.target.closest('.tab-link');
         if (targetLink && !targetLink.classList.contains('active')) {
             const tabId = targetLink.dataset.tab;
+            localStorage.setItem('tgButtonActiveTab', tabId); // 保存当前标签页
 
 
             const newContent = document.getElementById(tabId);
@@ -913,6 +1002,30 @@
     // --- 初始加载 ---
     loadState()
         .then(() => {
+            // -- 恢复上次打开的标签页 --
+            const savedTabId = localStorage.getItem('tgButtonActiveTab');
+            if (savedTabId) {
+                const targetLink = document.querySelector(`.tab-link[data-tab="${savedTabId}"]`);
+                const newContent = document.getElementById(savedTabId);
+
+                if (targetLink && newContent) {
+                    // 移除默认的 active 状态
+                    const defaultActiveLink = document.querySelector('.tab-link.active');
+                    const defaultActiveContent = document.querySelector('.tab-content.active');
+                    if(defaultActiveLink) defaultActiveLink.classList.remove('active');
+                    if(defaultActiveContent) {
+                       defaultActiveContent.classList.remove('active');
+                       defaultActiveContent.style.display = 'none';
+                    }
+
+                    // 设置新的 active 状态
+                    targetLink.classList.add('active');
+                    newContent.style.display = 'block';
+                    newContent.classList.add('active');
+                }
+            }
+            // -- 结束恢复 --
+
             // 设置指示器的初始位置，无动画
             updateTabIndicator(document.querySelector('.tab-link.active'), false);
         })
