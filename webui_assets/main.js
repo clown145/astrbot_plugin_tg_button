@@ -971,6 +971,8 @@
 
                     let field;
 
+                    const enumValues = Array.isArray(param.enum) ? param.enum : null;
+                    const optionValues = Array.isArray(param.options) ? param.options : null;
                     if (param.type === 'boolean') {
                         const switchWrapper = document.createElement('label');
                         switchWrapper.className = 'switch-toggle';
@@ -991,7 +993,48 @@
                         label.textContent = paramLabel;
                         field.appendChild(label);
                         field.appendChild(inputContainer);
+                    } else if ((enumValues && enumValues.length) || (optionValues && optionValues.length)) {
+                        const enumLabels = param.enum_labels || param.option_labels || {};
+                        const normalizedOptions = [];
+                        const sourceList = optionValues && optionValues.length ? optionValues : enumValues || [];
+                        sourceList.forEach(opt => {
+                            if (opt === null || opt === undefined) {
+                                return;
+                            }
+                            if (typeof opt === 'object') {
+                                const rawValue = opt.value ?? opt.id;
+                                if (rawValue === undefined || rawValue === null || rawValue === '') {
+                                    return;
+                                }
+                                const stringValue = String(rawValue);
+                                const labelText = opt.label || opt.name || enumLabels[stringValue] || stringValue;
+                                normalizedOptions.push({ value: stringValue, label: labelText });
+                            } else {
+                                const stringValue = String(opt);
+                                const labelText = enumLabels[stringValue] || stringValue;
+                                normalizedOptions.push({ value: stringValue, label: labelText });
+                            }
+                        });
 
+                        if (normalizedOptions.length > 0) {
+                            const selectedValue = isConnected
+                                ? ''
+                                : String(currentData[paramName] ?? param.default ?? '');
+                            const selectEl = createSelect(selectedValue, normalizedOptions, null);
+                            selectEl.dataset.paramName = paramName;
+                            selectEl.disabled = isConnected;
+                            inputContainer.appendChild(selectEl);
+                            field = createField(paramLabel, inputContainer);
+                        } else {
+                            const value = isConnected ? '' : (currentData[paramName] ?? (param.default ?? ''));
+                            const placeholder = isConnected ? '值由上游节点提供' : (param.placeholder || '');
+                            const input = createTextarea(value, null);
+                            input.dataset.paramName = paramName;
+                            input.disabled = isConnected;
+                            input.placeholder = placeholder;
+                            inputContainer.appendChild(input);
+                            field = createField(paramLabel, inputContainer);
+                        }
                     } else {
                         const value = isConnected ? '' : (currentData[paramName] ?? (param.default ?? ''));
                         const placeholder = isConnected ? '值由上游节点提供' : (param.placeholder || '');
@@ -1052,7 +1095,7 @@
             const finalData = { ...currentData };
 
             // 错误修复：同时查询 textarea 和 checkbox，以正确保存状态。
-            body.querySelectorAll('textarea[data-param-name], input[type="checkbox"][data-param-name]').forEach(input => {
+            body.querySelectorAll('textarea[data-param-name], input[type="checkbox"][data-param-name], select[data-param-name]').forEach(input => {
                 const key = input.dataset.paramName;
                 if (key) {
                     if (input.disabled) {

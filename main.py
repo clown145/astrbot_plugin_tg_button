@@ -5,8 +5,10 @@ AstrBot 动态按钮框架的核心插件文件。
 """
 
 import asyncio
+import html
 import hashlib
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -138,7 +140,7 @@ def _get_file_hash(path: Path) -> str:
     PLUGIN_NAME,
     "clown145",
     "一个可以通过 Telegram 按钮与自定义 WebUI 管理的插件",
-    "1.2.2",
+    "1.3.0",
     "https://github.com/clown145/astrbot_plugin_tg_button",
 )
 class DynamicButtonFrameworkPlugin(Star):
@@ -423,6 +425,7 @@ class DynamicButtonFrameworkPlugin(Star):
         cancel_keywords: Optional[List[str]] = None,
         cancel_message: Optional[str] = None,
         parse_mode: str = "html",
+        display_mode: str = "button_label",
     ) -> Dict[str, Any]:
         client = self._get_telegram_client()
         chat_id = getattr(runtime, "chat_id", None)
@@ -448,25 +451,125 @@ class DynamicButtonFrameworkPlugin(Star):
                 return "Markdown"
             return "HTML"
 
+        parse_mode_value = (parse_mode or "html").strip().lower()
+
+        def _normalize_button_label(raw_text: Optional[str], fallback: Optional[str] = None) -> str:
+            base_text = str(raw_text or "").strip()
+            if parse_mode_value == "html" and base_text:
+                base_text = html.unescape(re.sub(r"<[^>]+>", "", base_text))
+            elif parse_mode_value in ("markdown", "md", "markdownv2", "mdv2") and base_text:
+                cleaned = re.sub(r"[*_`~]", "", base_text)
+                if parse_mode_value in ("markdownv2", "mdv2"):
+                    cleaned = re.sub(r"[\\\[\]()>"]", "", cleaned)
+                base_text = cleaned.strip()
+            if not base_text:
+                base_text = str(raw_text or "").strip()
+            if not base_text and fallback:
+                base_text = str(fallback).strip()
+            if len(base_text) > 64:
+                base_text = base_text[:61] + "..."
+            return base_text
+
         tg_parse_mode = _map_parse_mode(parse_mode)
         prompt_text = prompt or "请输入内容："
-        try:
-            await client.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=prompt_text,
-                parse_mode=tg_parse_mode,
-                reply_markup=None,
-            )
-        except Exception as exc:
-            self.logger.error(f"发送等待输入提示失败: {exc}", exc_info=True)
-            return {
-                "new_text": f"等待用户输入失败: {exc}",
-                "user_input": "",
-                "user_input_status": "error",
-                "user_input_is_timeout": False,
-                "user_input_is_cancelled": False,
-            }
+
+        display_mode_value = str(display_mode or "button_label").strip().lower()
+        button_label_mode = display_mode_value in {"button_label", "button", "button_title"}
+
+        variables: Dict[str, Any] = getattr(runtime, "variables", {}) or {}
+        menu_id = variables.get("menu_id")
+        button_id = variables.get("button_id")
+        original_button_text = variables.get("button_text")
+        callback_data = getattr(runtime, "callback_data", "") or ""
+        if not button_id and callback_data:
+            for prefix in (
+                self.CALLBACK_PREFIX_WORKFLOW,
+                self.CALLBACK_PREFIX_ACTION,
+                self.CALLBACK_PREFIX_COMMAND,
+                self.CALLBACK_PREFIX_MENU,
+                self.CALLBACK_PREFIX_BACK,
+            ):
+                if callback_data.startswith(prefix):
+                    button_id = callback_data[len(prefix) :]
+                    break
+
+        button_snapshot: Optional[ButtonsModel] = None
+        button_menu: Optional[MenuDefinition] = None
+
+        if button_label_mode:
+            try:
+                button_snapshot = await self.button_store.get_snapshot()
+            except Exception as exc:
+                self.logger.error(f"获取按钮快照失败: {exc}", exc_info=True)
+                button_label_mode = False
+            else:
+                if menu_id:
+                    button_menu = button_snapshot.menus.get(menu_id)
+                if not button_menu and button_id:
+                    button_menu = self._find_menu_for_button(button_snapshot, button_id)
+                    if button_menu:
+                        menu_id = button_menu.id
+                if button_id and not original_button_text:
+                    button_def = button_snapshot.buttons.get(button_id)
+                    if button_def:
+                        original_button_text = button_def.text
+                if not (button_snapshot and button_menu and button_id):
+                    button_label_mode = False
+
+        async def _set_button_label(
+            snapshot: ButtonsModel,
+            menu: MenuDefinition,
+            label_text: Optional[str],
+        ) -> bool:
+            if not button_id:
+                return False
+            overrides_map: Dict[str, Dict[str, Any]] = {}
+            if label_text is not None:
+                overrides_map = self._resolve_button_overrides(
+                    snapshot,
+                    menu,
+                    [{"target": "self", "text": label_text}],
+                    button_id,
+                )
+            markup, _ = self._build_menu_markup(menu.id, snapshot, overrides=overrides_map)
+            if markup is None:
+                return False
+            try:
+                await client.edit_message_reply_markup(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reply_markup=markup,
+                )
+                return True
+            except Exception as exc:
+                self.logger.error(f"更新按钮标题失败: {exc}", exc_info=True)
+                return False
+
+        if button_label_mode:
+            prompt_label = _normalize_button_label(prompt_text, original_button_text)
+            if not prompt_label or not await _set_button_label(
+                button_snapshot, button_menu, prompt_label
+            ):
+                button_label_mode = False
+
+        if not button_label_mode:
+            try:
+                await client.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=prompt_text,
+                    parse_mode=tg_parse_mode,
+                    reply_markup=None,
+                )
+            except Exception as exc:
+                self.logger.error(f"发送等待输入提示失败: {exc}", exc_info=True)
+                return {
+                    "new_text": f"等待用户输入失败: {exc}",
+                    "user_input": "",
+                    "user_input_status": "error",
+                    "user_input_is_timeout": False,
+                    "user_input_is_cancelled": False,
+                }
 
         timeout = max(int(timeout or 0), 1)
         cancel_set = {kw.strip().lower() for kw in (cancel_keywords or []) if kw.strip()}
@@ -549,18 +652,24 @@ class DynamicButtonFrameworkPlugin(Star):
 
             if not stripped and not allow_empty:
                 retry_text = retry_prompt or prompt_text
-                try:
-                    await client.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=retry_text,
-                        parse_mode=tg_parse_mode,
-                        reply_markup=None,
+                if button_label_mode and button_snapshot and button_menu:
+                    retry_label = _normalize_button_label(
+                        retry_text, original_button_text or prompt_text
                     )
-                except Exception as retry_exc:
-                    self.logger.error(
-                        f"更新等待输入提示失败: {retry_exc}", exc_info=True
-                    )
+                    await _set_button_label(button_snapshot, button_menu, retry_label)
+                else:
+                    try:
+                        await client.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            text=retry_text,
+                            parse_mode=tg_parse_mode,
+                            reply_markup=None,
+                        )
+                    except Exception as retry_exc:
+                        self.logger.error(
+                            f"更新等待输入提示失败: {retry_exc}", exc_info=True
+                        )
                 controller.keep(timeout=timeout, reset_timeout=True)
                 return
 
@@ -589,25 +698,65 @@ class DynamicButtonFrameworkPlugin(Star):
         timed_out = outcome == "timeout"
         cancelled = outcome == "cancelled"
         final_text: Optional[str] = None
+        button_overrides: List[Dict[str, Any]] = []
 
-        if outcome == "success":
-            final_text = _render_user_template(success_message, user_input_text)
-        elif outcome == "timeout":
-            final_text = timeout_message or "输入超时，操作已取消。"
-        elif outcome == "cancelled":
-            final_text = cancel_message or timeout_message or prompt_text
+        if button_label_mode:
+            label_source: Optional[str]
+            if outcome == "success":
+                label_source = _render_user_template(success_message, user_input_text)
+            elif outcome == "timeout":
+                label_source = timeout_message or "输入超时，操作已取消。"
+            elif outcome == "cancelled":
+                label_source = cancel_message or timeout_message or prompt_text
+            else:
+                label_source = None
 
-        if final_text:
-            try:
-                await client.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    text=final_text,
-                    parse_mode=tg_parse_mode,
-                    reply_markup=None,
+            final_label = _normalize_button_label(
+                label_source,
+                original_button_text or prompt_text,
+            )
+
+            if button_id and menu_id and final_label:
+                try:
+                    latest_snapshot = await self.button_store.get_snapshot()
+                except Exception as exc:
+                    self.logger.error(f"刷新按钮快照失败: {exc}", exc_info=True)
+                    latest_snapshot = None
+                    latest_menu = None
+                else:
+                    latest_menu = (
+                        latest_snapshot.menus.get(menu_id)
+                        if latest_snapshot
+                        else None
+                    )
+                    if latest_snapshot and not latest_menu and button_id:
+                        latest_menu = self._find_menu_for_button(
+                            latest_snapshot, button_id
+                        )
+                if latest_snapshot and latest_menu:
+                    await _set_button_label(latest_snapshot, latest_menu, final_label)
+                button_overrides.append(
+                    {"target": "self", "text": final_label, "temporary": True}
                 )
-            except Exception as exc:
-                self.logger.error(f"更新等待输入结果失败: {exc}", exc_info=True)
+        else:
+            if outcome == "success":
+                final_text = _render_user_template(success_message, user_input_text)
+            elif outcome == "timeout":
+                final_text = timeout_message or "输入超时，操作已取消。"
+            elif outcome == "cancelled":
+                final_text = cancel_message or timeout_message or prompt_text
+
+            if final_text:
+                try:
+                    await client.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=final_text,
+                        parse_mode=tg_parse_mode,
+                        reply_markup=None,
+                    )
+                except Exception as exc:
+                    self.logger.error(f"更新等待输入结果失败: {exc}", exc_info=True)
 
         result: Dict[str, Any] = {
             "user_input": user_input_text,
@@ -624,6 +773,9 @@ class DynamicButtonFrameworkPlugin(Star):
         if final_text:
             result["new_text"] = final_text
             result["parse_mode"] = parse_mode or "html"
+
+        if button_overrides:
+            result["button_overrides"] = button_overrides
 
         return result
 
@@ -659,6 +811,7 @@ class DynamicButtonFrameworkPlugin(Star):
                 if item.strip()
             ]
         parse_mode = kwargs.get("parse_mode", "html")
+        display_mode = kwargs.get("display_mode") or "message_text"
 
         return await self.wait_for_user_input(
             runtime,
@@ -671,6 +824,7 @@ class DynamicButtonFrameworkPlugin(Star):
             cancel_keywords=cancel_keywords,
             cancel_message=cancel_template,
             parse_mode=parse_mode,
+            display_mode=display_mode,
         )
 
     def _get_telegram_client(self) -> Optional[ExtBot]:

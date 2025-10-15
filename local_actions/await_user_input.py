@@ -13,6 +13,18 @@ ACTION_METADATA = {
             "description": "显示给用户的提示消息（支持工作流上下文模板）。",
         },
         {
+            "name": "prompt_display_mode",
+            "type": "string",
+            "required": False,
+            "default": "button_label",
+            "description": "提示展示方式：仅替换触发按钮的标题文本，或改写整条消息。",
+            "enum": ["button_label", "message_text"],
+            "enum_labels": {
+                "button_label": "修改按钮标题",
+                "message_text": "替换消息文本",
+            },
+        },
+        {
             "name": "timeout_seconds",
             "type": "integer",
             "required": False,
@@ -62,7 +74,14 @@ ACTION_METADATA = {
             "type": "string",
             "required": False,
             "default": "html",
-            "description": "发送提示/结果时使用的 Telegram 解析模式，可选 html/markdown/markdownv2/none。",
+            "description": "发送提示/结果时使用的 Telegram 解析模式。",
+            "enum": ["html", "markdown", "markdownv2", "none"],
+            "enum_labels": {
+                "html": "HTML",
+                "markdown": "Markdown",
+                "markdownv2": "Markdown V2",
+                "none": "纯文本",
+            },
         },
     ],
     "outputs": [
@@ -120,6 +139,7 @@ async def execute(
     *,
     runtime,
     prompt_template: str = "请输入内容：",
+    prompt_display_mode: str = "button_label",
     timeout_seconds: Any = 60,
     allow_empty: bool = False,
     retry_prompt_template: str = "",
@@ -157,6 +177,7 @@ async def execute(
             cancel_keywords=keywords,
             cancel_message=cancel_template or None,
             parse_mode=parse_mode or "html",
+            display_mode=prompt_display_mode or "button_label",
         )
     except Exception as exc:  # Defensive logging
         logger = getattr(plugin, "logger", None)
