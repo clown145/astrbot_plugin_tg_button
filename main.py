@@ -364,21 +364,6 @@ class DynamicButtonFrameworkPlugin(Star):
     # 会通过 'plugin' 实例来使用它们。
 
     async def _dispatch_command(self, query, command_text: str):
-        """
-        [!!] 核心风险点：事件模拟 (Event Faking) [!!]
-        此方法通过手动构建一个`AstrMessageEvent`对象并将其放入事件队列，
-        来模拟一个真实的用户命令输入。这是一种绕过标准事件处理流程的“hack”手段，
-        目的是为了能从一个按钮回调中触发另一个命令的功能。
-
-        风险:
-        - 脆弱性: 此实现强依赖`AstrBot`和`TelegramPlatformEvent`的内部结构。
-          如果未来`AstrBot`的版本更新修改了这些对象的构造方式或必需的属性，
-          此处的代码将会失效并导致运行时错误。
-        - 难以调试: 这种方式创建的事件在日志和追踪中可能难以与真实用户事件区分开。
-
-        保留原因:
-        - 目前这是在按钮框架内实现“执行一个命令”这一功能的唯一方式。
-        """
         platform = self.context.get_platform("telegram")
         if (
             not platform
@@ -780,3 +765,4 @@ class DynamicButtonFrameworkPlugin(Star):
             except ValueError:
                 return chat, None
         return chat_id_str, None
+
