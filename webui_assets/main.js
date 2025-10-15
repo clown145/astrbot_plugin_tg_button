@@ -803,6 +803,36 @@
             : (action.isLocal ? (action.parameters || []) : []);
         const actionOutputs = action.isModular ? (action.outputs || []) : [];
 
+        const buildButtonOptions = () => {
+            const buttons = state.buttons || {};
+            const menus = state.menus || {};
+            const buttonToMenu = {};
+
+            Object.values(menus).forEach(menu => {
+                if (!menu || !Array.isArray(menu.items)) return;
+                menu.items.forEach(btnId => {
+                    if (btnId && !buttonToMenu[btnId]) {
+                        const name = menu.name || menu.id || '';
+                        buttonToMenu[btnId] = name
+                            ? `${name} (${menu.id})`
+                            : `${menu.id || '未命名菜单'}`;
+                    }
+                });
+            });
+
+            return Object.keys(buttons).map(id => {
+                const btn = buttons[id] || {};
+                const textLabel = btn.text || '(未命名按钮)';
+                const menuLabel = buttonToMenu[id] || '未分配菜单';
+                return {
+                    value: id,
+                    label: `${textLabel} · ${menuLabel} · ${id}`,
+                };
+            }).sort((a, b) => a.label.localeCompare(b.label));
+        };
+
+        const cachedButtonOptions = buildButtonOptions();
+
         const renderConditionFields = () => {
             conditionDetailsWrapper.innerHTML = '';
             if (conditionMode === 'none') {
@@ -967,6 +997,36 @@
                         field.appendChild(label);
                         field.appendChild(inputContainer);
 
+                    } else if (param.type === 'button') {
+                        const value = isConnected
+                            ? ''
+                            : (currentData[paramName] ?? (param.default ?? ''));
+                        const select = createSelect(value, cachedButtonOptions, null);
+                        select.dataset.paramName = paramName;
+                        select.disabled = isConnected;
+                        inputContainer.appendChild(select);
+
+                        if (isConnected) {
+                            const connectedNotice = document.createElement('p');
+                            connectedNotice.className = 'field-description muted';
+                            connectedNotice.style.margin = '4px 0 0 0';
+                            connectedNotice.textContent = '值由上游节点提供';
+                            inputContainer.appendChild(connectedNotice);
+                        } else if (!cachedButtonOptions.length) {
+                            const emptyHint = document.createElement('p');
+                            emptyHint.className = 'field-description muted';
+                            emptyHint.style.margin = '4px 0 0 0';
+                            emptyHint.textContent = '当前没有可用的按钮，请先在“按钮”页面创建或保存一个按钮。';
+                            inputContainer.appendChild(emptyHint);
+                        } else {
+                            const hint = document.createElement('p');
+                            hint.className = 'field-description muted';
+                            hint.style.margin = '4px 0 0 0';
+                            hint.textContent = '列表会展示所有现有按钮，包含所属菜单与 ID，便于快速匹配。';
+                            inputContainer.appendChild(hint);
+                        }
+
+                        field = createField(paramLabel, inputContainer);
                     } else {
                         const value = isConnected ? '' : (currentData[paramName] ?? (param.default ?? ''));
                         const placeholder = isConnected ? '值由上游节点提供' : (param.placeholder || '');
@@ -1027,16 +1087,30 @@
             const finalData = { ...currentData };
 
             // 错误修复：同时查询 textarea 和 checkbox，以正确保存状态。
-            body.querySelectorAll('textarea[data-param-name], input[type="checkbox"][data-param-name]').forEach(input => {
+            body.querySelectorAll('[data-param-name]').forEach(input => {
                 const key = input.dataset.paramName;
-                if (key) {
-                    if (input.disabled) {
-                        delete finalData[key];
-                    } else {
-                        // 根据输入类型保存值
-                        finalData[key] = input.type === 'checkbox' ? input.checked : input.value;
-                    }
+                if (!key) return;
+
+                if (input.disabled) {
+                    delete finalData[key];
+                    return;
                 }
+
+                if (input.tagName === 'INPUT' && input.type === 'checkbox') {
+                    finalData[key] = input.checked;
+                    return;
+                }
+
+                if (input.tagName === 'SELECT') {
+                    if (input.value) {
+                        finalData[key] = input.value;
+                    } else {
+                        delete finalData[key];
+                    }
+                    return;
+                }
+
+                finalData[key] = input.value;
             });
 
             if (conditionMode === 'none') {
