@@ -410,6 +410,223 @@ class DynamicButtonFrameworkPlugin(Star):
         fake_event.is_at_or_wake_command = True
         self.context.get_event_queue().put_nowait(fake_event)
 
+    async def wait_for_user_input(
+        self,
+        runtime: Any,
+        *,
+        prompt: str = "请输入内容：",
+        timeout: int = 60,
+        allow_empty: bool = False,
+        retry_prompt: Optional[str] = None,
+        success_message: Optional[str] = None,
+        timeout_message: Optional[str] = None,
+        cancel_keywords: Optional[List[str]] = None,
+        cancel_message: Optional[str] = None,
+        parse_mode: str = "html",
+    ) -> Dict[str, Any]:
+        client = self._get_telegram_client()
+        chat_id = getattr(runtime, "chat_id", None)
+        message_id = getattr(runtime, "message_id", None)
+        if not client or not chat_id or not message_id:
+            return {
+                "new_text": "等待用户输入失败：缺少聊天上下文。",
+                "user_input": "",
+                "user_input_status": "error",
+                "user_input_is_timeout": False,
+                "user_input_is_cancelled": False,
+            }
+
+        def _map_parse_mode(value: Optional[str]) -> Optional[str]:
+            if not value:
+                return "HTML"
+            lowered = value.strip().lower()
+            if lowered in ("", "none", "plain"):
+                return None
+            if lowered in ("markdownv2", "mdv2"):
+                return "MarkdownV2"
+            if lowered in ("markdown", "md"):
+                return "Markdown"
+            return "HTML"
+
+        tg_parse_mode = _map_parse_mode(parse_mode)
+        prompt_text = prompt or "请输入内容："
+        try:
+            await client.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=prompt_text,
+                parse_mode=tg_parse_mode,
+                reply_markup=None,
+            )
+        except Exception as exc:
+            self.logger.error(f"发送等待输入提示失败: {exc}", exc_info=True)
+            return {
+                "new_text": f"等待用户输入失败: {exc}",
+                "user_input": "",
+                "user_input_status": "error",
+                "user_input_is_timeout": False,
+                "user_input_is_cancelled": False,
+            }
+
+        timeout = max(int(timeout or 0), 1)
+        cancel_set = {kw.strip().lower() for kw in (cancel_keywords or []) if kw.strip()}
+        platform = self.context.get_platform("telegram")
+        if not platform:
+            return {
+                "new_text": "等待用户输入失败：未找到 Telegram 平台。",
+                "user_input": "",
+                "user_input_status": "error",
+                "user_input_is_timeout": False,
+                "user_input_is_cancelled": False,
+            }
+
+        fake_message = AstrBotMessage()
+        fake_message.self_id = str(client.id)
+        if getattr(runtime, "chat_type", None) == "private":
+            fake_message.type = MessageType.FRIEND_MESSAGE
+            fake_message.session_id = chat_id
+        else:
+            fake_message.type = MessageType.GROUP_MESSAGE
+            session_id = (
+                f"{chat_id}#{getattr(runtime, 'thread_id', None)}"
+                if getattr(runtime, "thread_id", None) is not None
+                else chat_id
+            )
+            fake_message.group_id = session_id
+            fake_message.session_id = session_id
+        fake_message.sender = MessageMember(
+            user_id=getattr(runtime, "user_id", "") or "",
+            nickname=(
+                getattr(runtime, "full_name", None)
+                or getattr(runtime, "username", None)
+                or ""
+            ),
+        )
+        fake_message.message_str = "/__wait_for_input__"
+        fake_message.timestamp = int(time.time())
+
+        fake_event = TelegramPlatformEvent(
+            message_str=fake_message.message_str,
+            message_obj=fake_message,
+            platform_meta=platform.meta(),
+            session_id=fake_message.session_id,
+            client=client,
+        )
+        fake_event.context = self.context
+
+        captured: Dict[str, Any] = {
+            "text": "",
+            "message_id": None,
+            "timestamp": None,
+        }
+        outcome = "timeout"
+
+        def _render_user_template(template: Optional[str], user_text: str) -> Optional[str]:
+            if not template:
+                return None
+            return (
+                template.replace("{{ user_input }}", user_text)
+                .replace("{{user_input}}", user_text)
+            )
+
+        @session_waiter(timeout=timeout, record_history_chains=False)
+        async def user_input_waiter(
+            controller: SessionController, event: AstrMessageEvent
+        ):
+            nonlocal outcome
+            text = event.message_str or ""
+            stripped = text.strip()
+            lowered = stripped.lower()
+
+            if cancel_set and lowered in cancel_set:
+                captured["text"] = text
+                msg_obj = getattr(event, "message_obj", None)
+                captured["message_id"] = getattr(msg_obj, "message_id", None)
+                captured["timestamp"] = getattr(msg_obj, "timestamp", None)
+                outcome = "cancelled"
+                controller.stop()
+                return
+
+            if not stripped and not allow_empty:
+                retry_text = retry_prompt or prompt_text
+                try:
+                    await client.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=retry_text,
+                        parse_mode=tg_parse_mode,
+                        reply_markup=None,
+                    )
+                except Exception as retry_exc:
+                    self.logger.error(
+                        f"更新等待输入提示失败: {retry_exc}", exc_info=True
+                    )
+                controller.keep(timeout=timeout, reset_timeout=True)
+                return
+
+            msg_obj = getattr(event, "message_obj", None)
+            captured["text"] = text
+            captured["message_id"] = getattr(msg_obj, "message_id", None)
+            captured["timestamp"] = getattr(msg_obj, "timestamp", None)
+            outcome = "success"
+            controller.stop()
+
+        try:
+            await user_input_waiter(fake_event)
+        except TimeoutError:
+            outcome = "timeout"
+        except Exception as exc:
+            self.logger.error(f"等待用户输入时发生错误: {exc}", exc_info=True)
+            return {
+                "new_text": f"等待用户输入失败: {exc}",
+                "user_input": "",
+                "user_input_status": "error",
+                "user_input_is_timeout": False,
+                "user_input_is_cancelled": False,
+            }
+
+        user_input_text = captured.get("text", "")
+        timed_out = outcome == "timeout"
+        cancelled = outcome == "cancelled"
+        final_text: Optional[str] = None
+
+        if outcome == "success":
+            final_text = _render_user_template(success_message, user_input_text)
+        elif outcome == "timeout":
+            final_text = timeout_message or "输入超时，操作已取消。"
+        elif outcome == "cancelled":
+            final_text = cancel_message or timeout_message or prompt_text
+
+        if final_text:
+            try:
+                await client.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=final_text,
+                    parse_mode=tg_parse_mode,
+                    reply_markup=None,
+                )
+            except Exception as exc:
+                self.logger.error(f"更新等待输入结果失败: {exc}", exc_info=True)
+
+        result: Dict[str, Any] = {
+            "user_input": user_input_text,
+            "user_input_status": outcome if outcome != "timeout" else "timeout",
+            "user_input_is_timeout": timed_out,
+            "user_input_is_cancelled": cancelled,
+        }
+
+        if captured.get("message_id") is not None:
+            result["user_input_message_id"] = str(captured["message_id"])
+        if captured.get("timestamp") is not None:
+            result["user_input_timestamp"] = captured["timestamp"]
+
+        if final_text:
+            result["new_text"] = final_text
+            result["parse_mode"] = parse_mode or "html"
+
+        return result
+
     async def start_search_session(self, runtime: Any, **kwargs) -> Dict[str, Any]:
         """
         [!!] 核心风险点：事件模拟 (Event Faking) [!!]
@@ -426,83 +643,35 @@ class DynamicButtonFrameworkPlugin(Star):
         """
         prompt = kwargs.get("prompt", "请输入内容：")
         timeout = int(kwargs.get("timeout", 60))
-        client = self._get_telegram_client()
-        if not client or not runtime.chat_id or not runtime.message_id:
-            return {"new_text": "执行失败：缺少上下文。"}
-
-        try:
-            await client.edit_message_text(
-                chat_id=runtime.chat_id,
-                message_id=runtime.message_id,
-                text=prompt,
-                reply_markup=None,  # 等待输入时清除按钮
-            )
-        except Exception as e:
-            self.logger.error(f"编辑消息以提示输入时出错: {e}")
-            return {"new_text": f"执行失败: {e}"}
-
-        # --- 创建一个伪事件来启动会话 ---
-        platform = self.context.get_platform("telegram")
-        fake_message = AstrBotMessage()
-        fake_message.self_id = str(client.id)
-        if runtime.chat_type == "private":
-            fake_message.type = MessageType.FRIEND_MESSAGE
-            fake_message.session_id = runtime.chat_id
-        else:
-            fake_message.type = MessageType.GROUP_MESSAGE
-            session_id = (
-                f"{runtime.chat_id}#{runtime.thread_id}"
-                if runtime.thread_id is not None
-                else runtime.chat_id
-            )
-            fake_message.group_id = session_id
-            fake_message.session_id = session_id
-        fake_message.sender = MessageMember(
-            user_id=runtime.user_id or "",
-            nickname=runtime.full_name or runtime.username or "",
+        allow_empty = bool(kwargs.get("allow_empty", False))
+        retry_prompt = kwargs.get("retry_prompt")
+        success_template = kwargs.get(
+            "success_message",
+            "模拟搜索完成。\n您的输入是: '{{ user_input }}'\n\n现在您可以手动恢复菜单。",
         )
-        fake_message.message_str = "/fake_command_for_session"
-        fake_message.timestamp = int(time.time())
+        timeout_template = kwargs.get("timeout_message", "输入超时，操作已取消。")
+        cancel_template = kwargs.get("cancel_message")
+        cancel_keywords = kwargs.get("cancel_keywords")
+        if isinstance(cancel_keywords, str):
+            cancel_keywords = [
+                item.strip()
+                for item in cancel_keywords.replace("\r", "\n").splitlines()
+                if item.strip()
+            ]
+        parse_mode = kwargs.get("parse_mode", "html")
 
-        fake_event = TelegramPlatformEvent(
-            message_str=fake_message.message_str,
-            message_obj=fake_message,
-            platform_meta=platform.meta(),
-            session_id=fake_message.session_id,
-            client=client,
+        return await self.wait_for_user_input(
+            runtime,
+            prompt=prompt,
+            timeout=timeout,
+            allow_empty=allow_empty,
+            retry_prompt=retry_prompt,
+            success_message=success_template,
+            timeout_message=timeout_template,
+            cancel_keywords=cancel_keywords,
+            cancel_message=cancel_template,
+            parse_mode=parse_mode,
         )
-        fake_event.context = self.context
-        # --- 会话等待器定义 ---
-
-        @session_waiter(timeout=timeout)
-        async def search_waiter(controller: SessionController, event: AstrMessageEvent):
-            user_input = event.message_str
-            await client.edit_message_text(
-                chat_id=runtime.chat_id,
-                message_id=runtime.message_id,
-                text=f"模拟搜索完成。\n您的输入是: '{user_input}'\n\n现在您可以手动恢复菜单。",
-            )
-            controller.stop()
-
-        try:
-            await search_waiter(fake_event)
-        except TimeoutError:
-            await client.edit_message_text(
-                chat_id=runtime.chat_id,
-                message_id=runtime.message_id,
-                text="输入超时，操作已取消。",
-            )
-        except Exception as e:
-            self.logger.error(f"会话执行期间出错: {e}", exc_info=True)
-            await client.edit_message_text(
-                chat_id=runtime.chat_id,
-                message_id=runtime.message_id,
-                text=f"会话处理失败: {e}",
-            )
-
-        # 这个本地动作本身不需要向执行器返回任何东西，
-        # 因为它自己处理所有用户交互。
-        return {}
 
     def _get_telegram_client(self) -> Optional[ExtBot]:
         platform = self.context.get_platform("telegram")

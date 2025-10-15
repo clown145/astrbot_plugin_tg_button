@@ -747,7 +747,8 @@
         Object.entries(node.inputs || {}).forEach(([portName, portData]) => {
             const portMeta = inputMetaByPort.get(portName) || {};
             const portIndexMatch = /input_(\d+)/.exec(portName);
-            const fallbackName = portMeta.name || (portIndexMatch ? `input_${portIndexMatch[1]}` : portName);
+            const targetInputKey = portMeta.name || (portIndexMatch ? `input_${portIndexMatch[1]}` : portName);
+            const displayName = portMeta.name || targetInputKey;
             const fallbackType = portMeta.type || null;
 
             (portData?.connections || []).forEach(connection => {
@@ -767,7 +768,7 @@
                 const outputName = outputMeta?.name || (outputIndex >= 0 ? `output_${outputIndex + 1}` : sourcePort || '');
                 const outputType = outputMeta?.type || null;
 
-                const linkKey = createConditionLinkKey(sourceNodeId, outputName || sourcePort || '', fallbackName);
+                const linkKey = createConditionLinkKey(sourceNodeId, outputName || sourcePort || '', targetInputKey);
                 const sourceActionName = upstreamAction?.name || upstreamAction?.id || sourceNodeId || '未知节点';
                 const labelParts = [];
                 if (sourceActionName) labelParts.push(sourceActionName);
@@ -775,14 +776,17 @@
                 const sourceLabel = labelParts.length > 0
                     ? labelParts.join(' → ')
                     : `节点 ${sourceNodeId ?? '?'}`;
-                const label = `${sourceLabel} → ${fallbackName}`;
+                const label = `${sourceLabel} → ${displayName}`;
+
+                const templateTarget = targetInputKey.replace(/'/g, "\\'");
+                const template = `{{ inputs['${templateTarget}'] }}`;
 
                 links.push({
                     key: linkKey,
                     inputPort: portName,
-                    inputName: fallbackName,
+                    inputName: targetInputKey,
                     inputType: fallbackType,
-                    template: `{{ inputs.${fallbackName} }}`,
+                    template,
                     sourceNodeId,
                     sourceOutputPort: sourcePort || '',
                     sourceOutputName: outputName || '',

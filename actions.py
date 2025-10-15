@@ -338,6 +338,7 @@ class ActionExecutor:
         # 为当前节点收集输入参数
         input_params: Dict[str, Any] = {}
         input_params.update(node_def.data)
+        condition_cfg = input_params.pop("__condition__", None)
 
         for edge in edges:
             if edge.target_node == node_id:
@@ -366,17 +367,37 @@ class ActionExecutor:
             definition = found_action["definition"]
             result: Optional[ActionExecutionResult] = None
 
+            render_context = self._build_template_context(
+                action=node_def.data,
+                button=button,
+                menu=menu,
+                runtime=current_runtime,
+                variables=global_variables,
+            )
+
+            rendered_params = await self._arender_structure(
+                input_params, render_context
+            )
+            if not isinstance(rendered_params, dict):
+                rendered_params = {}
+
+            condition_context = dict(render_context)
+            condition_context.setdefault("inputs", rendered_params)
+
+            should_execute, condition_error = await self._evaluate_node_condition(
+                condition_cfg,
+                node_id=node_id,
+                condition_context=condition_context,
+            )
+            if condition_error:
+                return None, condition_error
+            if not should_execute:
+                self._logger.info(
+                    f"      - 节点 ‘{node_id}’ 的执行条件未满足，跳过。"
+                )
+                return ActionExecutionResult(success=True, data={"variables": {}}), None
+
             if kind == "modular":
-                render_context = self._build_template_context(
-                    action=node_def.data,
-                    button=button,
-                    menu=menu,
-                    runtime=current_runtime,
-                    variables=global_variables,
-                )
-                rendered_params = await self._arender_structure(
-                    input_params, render_context
-                )
                 result = await self._execute_modular(
                     plugin,
                     definition,
@@ -385,7 +406,7 @@ class ActionExecutor:
                     input_params=rendered_params,
                 )
             elif kind == "local":
-                current_runtime.variables.update(input_params)
+                current_runtime.variables.update(rendered_params)
                 result = await self._execute_local(
                     plugin,
                     definition,
@@ -395,7 +416,7 @@ class ActionExecutor:
                     preview=preview,
                 )
             elif kind == "http":
-                current_runtime.variables.update(input_params)
+                current_runtime.variables.update(rendered_params)
                 result = await self._execute_http(
                     definition,
                     button=button,
@@ -417,6 +438,81 @@ class ActionExecutor:
             error_msg = f"在节点 ‘{action_id}’ 遇到意外错误: {exc}"
             self._logger.error(f"工作流 ‘{workflow_id}’ {error_msg}", exc_info=True)
             return None, error_msg
+
+    async def _evaluate_node_condition(
+        self,
+        condition_cfg: Any,
+        *,
+        node_id: str,
+        condition_context: Dict[str, Any],
+    ) -> Tuple[bool, Optional[str]]:
+        """根据节点保存的条件配置判断是否应执行该节点。"""
+        if not isinstance(condition_cfg, dict):
+            return True, None
+
+        mode = str(condition_cfg.get("mode", "always") or "always").lower()
+        if mode in ("", "always"):
+            return True, None
+        if mode == "never":
+            return False, None
+
+        # 确保上下文中始终有 inputs 键，方便模板渲染。
+        if "inputs" not in condition_context:
+            condition_context["inputs"] = {}
+
+        try:
+            if mode == "expression":
+                expression = str(condition_cfg.get("expression", ""))
+                if not expression.strip():
+                    self._logger.warning(
+                        f"节点 ‘{node_id}’ 配置了空的表达式条件，视为 False。"
+                    )
+                    return False, None
+                rendered = await self._arender_template(
+                    expression, condition_context
+                )
+                return self._coerce_to_bool(rendered), None
+
+            if mode == "linked":
+                link_cfg = condition_cfg.get("link") or {}
+                template = link_cfg.get("template")
+                rendered_value: Any = None
+                if template:
+                    rendered_value = await self._arender_template(
+                        str(template), condition_context
+                    )
+                else:
+                    target_key = link_cfg.get("target_input") or link_cfg.get(
+                        "target_input_port"
+                    )
+                    inputs = condition_context.get("inputs", {})
+                    if isinstance(inputs, dict) and target_key in inputs:
+                        rendered_value = inputs.get(target_key)
+                return self._coerce_to_bool(rendered_value), None
+
+            self._logger.warning(
+                f"节点 ‘{node_id}’ 使用了未知的条件模式 '{mode}'，默认继续执行。"
+            )
+            return True, None
+        except Exception as exc:
+            error_msg = f"节点 ‘{node_id}’ 的条件计算失败: {exc}"
+            self._logger.error(error_msg, exc_info=True)
+            return False, error_msg
+
+    def _coerce_to_bool(self, value: Any) -> bool:
+        """将任意返回值转换为布尔值。"""
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in ("", "0", "false", "none", "null", "no", "off"):
+                return False
+            return True
+        return bool(value)
 
     async def _execute_workflow(
         self,
