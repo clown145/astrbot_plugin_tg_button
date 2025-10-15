@@ -57,6 +57,9 @@ class ActionExecutionResult:
     temp_files_to_clean: List[str] = field(default_factory=list)
 
 
+SKIPPED_NODE_OUTPUT = object()
+
+
 class ActionExecutor:
     def __init__(
         self,
@@ -309,8 +312,8 @@ class ActionExecutor:
         menu: Dict[str, Any],
         runtime: "RuntimeContext",
         global_variables: Dict[str, Any],
-        node_outputs: Dict[str, Dict[str, Any]],
-        edges: List[Any],  # List[WorkflowEdge]
+        node_outputs: Dict[str, Any],
+        incoming_edges: List[Any],  # List[WorkflowEdge]
         preview: bool,
     ) -> Tuple[Optional["ActionExecutionResult"], Optional[str]]:
         """执行单个工作流节点并返回结果。"""
@@ -319,7 +322,12 @@ class ActionExecutor:
             self._logger.warning(
                 f"  -> 跳过节点 '{node_id}'，因为它没有设置 action_id。"
             )
-            return ActionExecutionResult(success=True, data={"variables": {}}), None
+            return (
+                ActionExecutionResult(
+                    success=True, data={"variables": {}, "__skipped__": True}
+                ),
+                None,
+            )
 
         found_action = self._find_action_definition(action_id, snapshot)
         if not found_action:
@@ -332,31 +340,56 @@ class ActionExecutor:
             f"  -> 执行节点 ‘{node_id}’ (动作: '{action_id}', 类型: '{found_action['kind']}')"
         )
 
+        node_static_data = dict(node_def.data or {})
+        condition_cfg = node_static_data.pop("__condition__", None)
+
         # 为当前节点收集输入参数
         input_params: Dict[str, Any] = {}
-        input_params.update(node_def.data)
+        input_params.update(node_static_data)
 
-        for edge in edges:
-            if edge.target_node == node_id:
-                source_node = edge.source_node
-                source_output_name = edge.source_output
-                target_input_name = edge.target_input
+        for edge in incoming_edges:
+            source_node = edge.source_node
+            source_output_name = edge.source_output
+            target_input_name = edge.target_input
 
-                if (
-                    source_node in node_outputs
-                    and source_output_name in node_outputs[source_node]
-                ):
-                    input_params[target_input_name] = node_outputs[source_node][
-                        source_output_name
-                    ]
-                else:
-                    self._logger.warning(
-                        f"      - 输入 '{target_input_name}' 的值无法从上游节点 '{source_node}' 的输出 '{source_output_name}' 中找到。"
-                    )
+            source_payload = node_outputs.get(source_node)
+            if source_payload is SKIPPED_NODE_OUTPUT or source_payload is None:
+                continue
+
+            if isinstance(source_payload, dict) and source_output_name in source_payload:
+                input_params[target_input_name] = source_payload[source_output_name]
+            else:
+                self._logger.warning(
+                    f"      - 输入 '{target_input_name}' 的值无法从上游节点 '{source_node}' 的输出 '{source_output_name}' 中找到。"
+                )
 
         current_runtime_dict = runtime.__dict__.copy()
         current_runtime_dict["variables"] = global_variables
         current_runtime = RuntimeContext(**current_runtime_dict)
+
+        if condition_cfg is not None:
+            should_execute, condition_error = await self._evaluate_workflow_node_condition(
+                condition_cfg,
+                button=button,
+                menu=menu,
+                runtime=current_runtime,
+                variables=global_variables,
+                inputs=input_params,
+                node_data=node_static_data,
+            )
+            if condition_error:
+                return None, condition_error
+            if not should_execute:
+                self._logger.info(
+                    f"  -> 节点 '{node_id}' 的条件未满足，跳过执行。"
+                )
+                return (
+                    ActionExecutionResult(
+                        success=True,
+                        data={"variables": {}, "__skipped__": True},
+                    ),
+                    None,
+                )
 
         try:
             kind = found_action["kind"]
@@ -411,6 +444,99 @@ class ActionExecutor:
             self._logger.error(f"工作流 ‘{workflow_id}’ {error_msg}", exc_info=True)
             return None, error_msg
 
+    async def _evaluate_workflow_node_condition(
+        self,
+        condition_cfg: Any,
+        *,
+        button: Dict[str, Any],
+        menu: Dict[str, Any],
+        runtime: RuntimeContext,
+        variables: Dict[str, Any],
+        inputs: Dict[str, Any],
+        node_data: Dict[str, Any],
+    ) -> Tuple[bool, Optional[str]]:
+        """计算节点条件，返回是否应执行节点以及错误信息。"""
+
+        context = self._build_template_context(
+            action=node_data,
+            button=button,
+            menu=menu,
+            runtime=runtime,
+            variables={**variables, "inputs": inputs},
+        )
+
+        try:
+            result = await self._resolve_condition_value(condition_cfg, context)
+            return bool(result), None
+        except Exception as exc:
+            return False, f"计算节点条件失败: {exc}"
+
+    async def _resolve_condition_value(
+        self, condition_cfg: Any, context: Dict[str, Any]
+    ) -> bool:
+        """根据配置解析条件的布尔值。"""
+
+        if isinstance(condition_cfg, bool):
+            return condition_cfg
+        if condition_cfg is None:
+            return False
+        if isinstance(condition_cfg, (int, float)):
+            return condition_cfg != 0
+        if isinstance(condition_cfg, str):
+            rendered = await self._arender_template(condition_cfg, context)
+            return self._interpret_condition_value(rendered)
+        if isinstance(condition_cfg, dict):
+            cond_type = str(condition_cfg.get("type", "template")).lower()
+            negate = bool(condition_cfg.get("negate"))
+
+            if cond_type in {"template", "jinja"}:
+                template_str = str(
+                    condition_cfg.get("template")
+                    or condition_cfg.get("expression")
+                    or ""
+                )
+                rendered = await self._arender_template(template_str, context)
+                value = self._interpret_condition_value(rendered)
+            elif cond_type in {"input", "port", "input_ref"}:
+                input_name = (
+                    condition_cfg.get("name")
+                    or condition_cfg.get("input")
+                    or condition_cfg.get("field")
+                )
+                if not input_name:
+                    raise ValueError("输入条件缺少 name/input 字段")
+                input_value = context.get("inputs", {}).get(str(input_name))
+                if input_value is None:
+                    fallback = condition_cfg.get("fallback")
+                    if "fallback" in condition_cfg:
+                        input_value = fallback
+                    elif "default" in condition_cfg:
+                        input_value = condition_cfg.get("default")
+                value = self._interpret_condition_value(input_value)
+            elif cond_type == "value":
+                value = self._interpret_condition_value(condition_cfg.get("value"))
+            elif cond_type == "variable":
+                variable_name = condition_cfg.get("name") or condition_cfg.get("key")
+                value = self._interpret_condition_value(
+                    context.get("variables", {}).get(variable_name)
+                )
+            else:
+                raise ValueError(f"不支持的条件类型: {cond_type}")
+
+            return not value if negate else value
+
+        return self._interpret_condition_value(condition_cfg)
+
+    def _interpret_condition_value(self, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            return value != 0
+        text = str(value).strip().lower()
+        return text not in {"", "0", "false", "none", "null", "no", "off"}
+
     async def _execute_workflow(
         self,
         plugin: "DynamicButtonFrameworkPlugin",
@@ -459,14 +585,33 @@ class ActionExecutor:
             return ActionExecutionResult(success=False, error=full_error_msg)
 
         # 3. 按顺序执行节点
-        node_outputs: Dict[str, Dict[str, Any]] = {}  # 格式: {节点ID: {输出名称: 值}}
+        node_outputs: Dict[str, Any] = {}  # 格式: {节点ID: 输出字典或哨兵值}
         final_result = ActionExecutionResult(success=True)
         final_text_parts = []
         global_variables = dict(runtime.variables)
         files_to_clean_in_workflow: List[str] = []
+        skipped_nodes: Dict[str, bool] = {}
 
         for node_id in exec_order:
             node_def = nodes[node_id]
+            incoming_edges = [
+                edge for edge in edges if edge.target_node == node_id
+            ]
+
+            if incoming_edges:
+                upstream_all_skipped = all(
+                    skipped_nodes.get(edge.source_node, False)
+                    or node_outputs.get(edge.source_node) is SKIPPED_NODE_OUTPUT
+                    for edge in incoming_edges
+                )
+                if upstream_all_skipped:
+                    self._logger.info(
+                        f"  -> 跳过节点 '{node_id}'，因为所有上游节点均被标记为跳过。"
+                    )
+                    skipped_nodes[node_id] = True
+                    node_outputs[node_id] = SKIPPED_NODE_OUTPUT
+                    continue
+
             result, error_msg = await self._execute_workflow_node(
                 plugin,
                 workflow_id,
@@ -478,7 +623,7 @@ class ActionExecutor:
                 runtime,
                 global_variables,
                 node_outputs,
-                edges,
+                incoming_edges,
                 preview,
             )
 
@@ -498,9 +643,17 @@ class ActionExecutor:
             if result.temp_files_to_clean:
                 files_to_clean_in_workflow.extend(result.temp_files_to_clean)
 
-            if result.data and isinstance(result.data.get("variables"), dict):
-                node_outputs[node_id] = result.data["variables"]
-                global_variables.update(result.data["variables"])
+            result_data = result.data or {}
+            if result_data.get("__skipped__"):
+                skipped_nodes[node_id] = True
+                node_outputs[node_id] = SKIPPED_NODE_OUTPUT
+                continue
+
+            if isinstance(result_data.get("variables"), dict):
+                variables_from_node = result_data["variables"]
+                node_outputs[node_id] = variables_from_node
+                if variables_from_node:
+                    global_variables.update(variables_from_node)
             else:
                 node_outputs[node_id] = {}
 
@@ -645,6 +798,13 @@ class ActionExecutor:
             except Exception:
                 resp_payload["json"] = None
 
+        variables_payload = variables or {}
+        inputs_payload: Dict[str, Any] = {}
+        if isinstance(variables_payload, dict):
+            maybe_inputs = variables_payload.get("inputs")
+            if isinstance(maybe_inputs, dict):
+                inputs_payload = maybe_inputs
+
         return {
             "action": action,
             "button": button,
@@ -652,7 +812,8 @@ class ActionExecutor:
             "runtime": runtime.__dict__,
             "response": resp_payload,
             "extracted": extracted,
-            "variables": variables or {},
+            "variables": variables_payload,
+            "inputs": inputs_payload,
         }
 
     async def _arender_template(
