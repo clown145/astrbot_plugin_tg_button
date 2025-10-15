@@ -782,6 +782,13 @@ class ActionExecutor:
             except Exception:
                 resp_payload["json"] = None
 
+        variables_payload = variables or {}
+        inputs_payload: Dict[str, Any] = {}
+        if isinstance(variables_payload, dict):
+            maybe_inputs = variables_payload.get("inputs")
+            if isinstance(maybe_inputs, dict):
+                inputs_payload = maybe_inputs
+
         return {
             "action": action,
             "button": button,
@@ -789,7 +796,8 @@ class ActionExecutor:
             "runtime": runtime.__dict__,
             "response": resp_payload,
             "extracted": extracted,
-            "variables": variables or {},
+            "variables": variables_payload,
+            "inputs": inputs_payload,
         }
 
     async def _arender_template(

@@ -753,7 +753,7 @@
         const conditionIntro = document.createElement('p');
         conditionIntro.className = 'field-description muted';
         conditionIntro.style.margin = '0 0 12px 0';
-        conditionIntro.textContent = '可以在这里设置该节点的触发条件；当条件不成立时，节点以及所有下游节点都会被跳过。';
+        conditionIntro.textContent = '可以在这里设置该节点的触发条件；当条件不成立时，节点以及所有下游节点都会被跳过。推荐在上游使用“条件判断 (Condition Check)”模块先计算布尔值，再在这里通过模板引用。';
         body.appendChild(conditionIntro);
 
         const detectConditionMode = (value) => {
@@ -798,6 +798,11 @@
         const conditionDetailsField = createField('条件配置', conditionDetailsWrapper);
         body.appendChild(conditionDetailsField);
 
+        const actionInputs = action.isModular
+            ? (action.inputs || [])
+            : (action.isLocal ? (action.parameters || []) : []);
+        const actionOutputs = action.isModular ? (action.outputs || []) : [];
+
         const renderConditionFields = () => {
             conditionDetailsWrapper.innerHTML = '';
             if (conditionMode === 'none') {
@@ -839,7 +844,7 @@
                 const textarea = createTextarea(conditionTemplateValue, (val) => {
                     conditionTemplateValue = val;
                 });
-                textarea.placeholder = '例如：{{ variables.enabled }} 或 {{ runtime.user_id == 123456 }}';
+                textarea.placeholder = '例如：{{ inputs.branch_result }} 或 {{ variables.my_flag }}';
                 textarea.rows = 3;
 
                 const hint = document.createElement('p');
@@ -847,8 +852,28 @@
                 hint.style.margin = '8px 0 0 0';
                 hint.textContent = '模板渲染结果会被解释为布尔值：空字符串、0、false 会视为条件不满足。';
 
+                const usage = document.createElement('p');
+                usage.className = 'field-description muted';
+                usage.style.margin = '4px 0 0 0';
+                const connectedInputs = [];
+                (actionInputs || []).forEach((param, index) => {
+                    const portName = `input_${index + 1}`;
+                    if (node.inputs[portName] && node.inputs[portName].connections.length > 0) {
+                        connectedInputs.push(param.name);
+                    }
+                });
+                if (connectedInputs.length > 0) {
+                    usage.textContent = `已连接的输入：${connectedInputs.join('、')}。可通过 {{ inputs.参数名 }} 读取对应值，或使用 {{ variables.别名 }} 访问全局变量。`;
+                } else if ((actionInputs || []).length > 0) {
+                    const names = actionInputs.map(param => param.name).join('、 ');
+                    usage.textContent = `当前动作支持的输入包含：${names}。当某个输入连接了上游节点后，可在模板中写 {{ inputs.参数名 }} 读取。`;
+                } else {
+                    usage.textContent = '如果只依赖全局变量，可以直接写 {{ variables.变量名 }}；若需要来自上游的布尔值，可将“条件判断”模块的输出连到任意输入端口。';
+                }
+
                 conditionDetailsWrapper.appendChild(textarea);
                 conditionDetailsWrapper.appendChild(hint);
+                conditionDetailsWrapper.appendChild(usage);
                 return;
             }
 
@@ -873,8 +898,14 @@
             hint.style.margin = '8px 0 0 0';
             hint.textContent = '适用于需要复杂条件的情况；填写任意合法的 JSON，保存前会尝试解析。';
 
+            const usage = document.createElement('p');
+            usage.className = 'field-description muted';
+            usage.style.margin = '4px 0 0 0';
+            usage.textContent = '模板型配置里同样支持 {{ inputs.参数名 }} 与 {{ variables.变量名 }}。通过“条件判断”模块可以快速生成这些布尔变量。';
+
             conditionDetailsWrapper.appendChild(textarea);
             conditionDetailsWrapper.appendChild(hint);
+            conditionDetailsWrapper.appendChild(usage);
         };
 
         conditionModeSelect.onchange = (e) => {
@@ -884,23 +915,20 @@
 
         renderConditionFields();
 
-        const inputs = action.isModular ? action.inputs : (action.isLocal ? action.parameters : []);
-        const outputs = action.isModular ? (action.outputs || []) : [];
-
-        if ((!inputs || inputs.length === 0) && (!outputs || outputs.length === 0)) {
+        if ((!actionInputs || actionInputs.length === 0) && (!actionOutputs || actionOutputs.length === 0)) {
             const noParams = document.createElement('p');
             noParams.className = 'muted';
             noParams.style.marginTop = '16px';
             noParams.textContent = '此节点没有可配置或可查看的参数。';
             body.appendChild(noParams);
         } else {
-            if (inputs && inputs.length > 0) {
+            if (actionInputs && actionInputs.length > 0) {
                 const inputsHeader = document.createElement('h4');
                 inputsHeader.textContent = '输入参数';
                 inputsHeader.style.marginTop = '0';
                 body.appendChild(inputsHeader);
 
-                inputs.forEach((param, index) => {
+                actionInputs.forEach((param, index) => {
                     const paramName = param.name;
                     const paramLabel = `${param.name}${param.type ? ` (${param.type})` : ''}`;
                     const paramDescription = param.description || '';
@@ -962,7 +990,7 @@
                 });
             }
 
-            if (outputs && outputs.length > 0) {
+            if (actionOutputs && actionOutputs.length > 0) {
                 const outputsHeader = document.createElement('h4');
                 outputsHeader.textContent = '输出端口';
                 outputsHeader.style.borderTop = '1px solid var(--border-color)';
@@ -970,7 +998,7 @@
                 outputsHeader.style.marginTop = '16px';
                 body.appendChild(outputsHeader);
 
-                outputs.forEach(output => {
+                actionOutputs.forEach(output => {
                     const outputContainer = document.createElement('div');
                     const descEl = document.createElement('p');
                     descEl.className = 'field-description muted';
