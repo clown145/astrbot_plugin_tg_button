@@ -17,10 +17,11 @@ ACTION_METADATA = {
             "type": "string",
             "required": False,
             "default": "button_label",
-            "description": "提示展示方式：仅替换触发按钮的标题文本，或改写整条消息。",
-            "enum": ["button_label", "message_text"],
+            "description": "提示展示方式：替换按钮标题、更新菜单标题或改写整条消息。",
+            "enum": ["button_label", "menu_title", "message_text"],
             "enum_labels": {
                 "button_label": "修改按钮标题",
+                "menu_title": "更新菜单标题",
                 "message_text": "替换消息文本",
             },
         },

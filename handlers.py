@@ -168,6 +168,7 @@ async def _prepare_execution_context(
             "menu_name": menu.name,
             "button_id": button.id,
             "button_text": button.text,
+            "menu_header_text": getattr(message, "text", None),
         },
     )
 

@@ -460,7 +460,9 @@ class DynamicButtonFrameworkPlugin(Star):
             elif parse_mode_value in ("markdown", "md", "markdownv2", "mdv2") and base_text:
                 cleaned = re.sub(r"[*_`~]", "", base_text)
                 if parse_mode_value in ("markdownv2", "mdv2"):
-                    cleaned = re.sub(r"[\\\[\]()>"]", "", cleaned)
+                    cleaned = cleaned.translate(
+                        str.maketrans("", "", "\\[]()>\"")
+                    )
                 base_text = cleaned.strip()
             if not base_text:
                 base_text = str(raw_text or "").strip()
@@ -474,12 +476,26 @@ class DynamicButtonFrameworkPlugin(Star):
         prompt_text = prompt or "请输入内容："
 
         display_mode_value = str(display_mode or "button_label").strip().lower()
-        button_label_mode = display_mode_value in {"button_label", "button", "button_title"}
+        if display_mode_value in {"menu_title", "menu_header", "header", "menu"}:
+            normalized_mode = "menu_title"
+        elif display_mode_value in {"message_text", "message", "text"}:
+            normalized_mode = "message_text"
+        else:
+            normalized_mode = "button_label"
+
+        button_label_mode = normalized_mode == "button_label"
+        menu_title_mode = normalized_mode == "menu_title"
+        message_text_mode = normalized_mode == "message_text"
 
         variables: Dict[str, Any] = getattr(runtime, "variables", {}) or {}
         menu_id = variables.get("menu_id")
         button_id = variables.get("button_id")
         original_button_text = variables.get("button_text")
+        original_menu_header = (
+            variables.get("menu_header_text")
+            or variables.get("menu_header")
+            or variables.get("menu_text")
+        )
         callback_data = getattr(runtime, "callback_data", "") or ""
         if not button_id and callback_data:
             for prefix in (
@@ -496,12 +512,11 @@ class DynamicButtonFrameworkPlugin(Star):
         button_snapshot: Optional[ButtonsModel] = None
         button_menu: Optional[MenuDefinition] = None
 
-        if button_label_mode:
+        if button_label_mode or menu_title_mode:
             try:
                 button_snapshot = await self.button_store.get_snapshot()
             except Exception as exc:
                 self.logger.error(f"获取按钮快照失败: {exc}", exc_info=True)
-                button_label_mode = False
             else:
                 if menu_id:
                     button_menu = button_snapshot.menus.get(menu_id)
@@ -513,8 +528,18 @@ class DynamicButtonFrameworkPlugin(Star):
                     button_def = button_snapshot.buttons.get(button_id)
                     if button_def:
                         original_button_text = button_def.text
-                if not (button_snapshot and button_menu and button_id):
-                    button_label_mode = False
+                if not original_menu_header:
+                    original_menu_header = (
+                        (button_menu.header if button_menu else None)
+                        or self.menu_header
+                    )
+
+        if button_label_mode and not (button_snapshot and button_menu and button_id):
+            button_label_mode = False
+            message_text_mode = True
+        if menu_title_mode and not (button_snapshot and button_menu):
+            menu_title_mode = False
+            message_text_mode = True
 
         async def _set_button_label(
             snapshot: ButtonsModel,
@@ -545,14 +570,41 @@ class DynamicButtonFrameworkPlugin(Star):
                 self.logger.error(f"更新按钮标题失败: {exc}", exc_info=True)
                 return False
 
+        async def _set_menu_header(
+            snapshot: ButtonsModel,
+            menu: MenuDefinition,
+            header_text: Optional[str],
+        ) -> bool:
+            markup, _ = self._build_menu_markup(menu.id, snapshot)
+            if markup is None:
+                return False
+            try:
+                await client.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=header_text or self.menu_header,
+                    parse_mode=tg_parse_mode,
+                    reply_markup=markup,
+                )
+                return True
+            except Exception as exc:
+                self.logger.error(f"更新菜单标题失败: {exc}", exc_info=True)
+                return False
+
         if button_label_mode:
             prompt_label = _normalize_button_label(prompt_text, original_button_text)
             if not prompt_label or not await _set_button_label(
                 button_snapshot, button_menu, prompt_label
             ):
                 button_label_mode = False
+                message_text_mode = True
 
-        if not button_label_mode:
+        if menu_title_mode:
+            if not await _set_menu_header(button_snapshot, button_menu, prompt_text):
+                menu_title_mode = False
+                message_text_mode = True
+
+        if message_text_mode and not button_label_mode and not menu_title_mode:
             try:
                 await client.edit_message_text(
                     chat_id=chat_id,
@@ -657,6 +709,8 @@ class DynamicButtonFrameworkPlugin(Star):
                         retry_text, original_button_text or prompt_text
                     )
                     await _set_button_label(button_snapshot, button_menu, retry_label)
+                elif menu_title_mode and button_snapshot and button_menu:
+                    await _set_menu_header(button_snapshot, button_menu, retry_text)
                 else:
                     try:
                         await client.edit_message_text(
@@ -738,6 +792,31 @@ class DynamicButtonFrameworkPlugin(Star):
                 button_overrides.append(
                     {"target": "self", "text": final_label, "temporary": True}
                 )
+        elif menu_title_mode:
+            if outcome == "success":
+                final_text = _render_user_template(success_message, user_input_text)
+            elif outcome == "timeout":
+                final_text = timeout_message or "输入超时，操作已取消。"
+            elif outcome == "cancelled":
+                final_text = cancel_message or timeout_message or prompt_text
+
+            if not final_text:
+                final_text = original_menu_header or prompt_text
+
+            latest_snapshot: Optional[ButtonsModel] = None
+            latest_menu: Optional[MenuDefinition] = None
+            try:
+                latest_snapshot = await self.button_store.get_snapshot()
+            except Exception as exc:
+                self.logger.error(f"刷新按钮快照失败: {exc}", exc_info=True)
+            else:
+                if menu_id:
+                    latest_menu = latest_snapshot.menus.get(menu_id)
+                if not latest_menu and button_id:
+                    latest_menu = self._find_menu_for_button(latest_snapshot, button_id)
+            if latest_snapshot and latest_menu and final_text:
+                await _set_menu_header(latest_snapshot, latest_menu, final_text)
+            final_text = final_text or original_menu_header or prompt_text
         else:
             if outcome == "success":
                 final_text = _render_user_template(success_message, user_input_text)
@@ -770,7 +849,11 @@ class DynamicButtonFrameworkPlugin(Star):
         if captured.get("timestamp") is not None:
             result["user_input_timestamp"] = captured["timestamp"]
 
-        if final_text:
+        if menu_title_mode and final_text:
+            result["new_text"] = final_text
+            result["parse_mode"] = parse_mode or "html"
+            result["should_edit_message"] = True
+        elif final_text and not button_label_mode:
             result["new_text"] = final_text
             result["parse_mode"] = parse_mode or "html"
 
