@@ -700,7 +700,8 @@ window.addEventListener('DOMContentLoaded', () => {
             } else {
                 console.error(`尝试更新节点配置失败: 未找到 ID 为 ${nodeId} 的节点。`);
             }
-        }
+        },
+        getNodeById: (nodeId) => editor.getNodeFromId(nodeId)
     };
 
     // --- 初始化 ---

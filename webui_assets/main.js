@@ -833,6 +833,46 @@
 
         const cachedButtonOptions = buildButtonOptions();
 
+        const detectBranchConditionLinks = () => {
+            if (!window.tgButtonEditor || typeof window.tgButtonEditor.getNodeById !== 'function') {
+                return [];
+            }
+
+            const links = [];
+            (actionInputs || []).forEach((param, index) => {
+                const portName = `input_${index + 1}`;
+                const port = node.inputs[portName];
+                const connections = (port && Array.isArray(port.connections)) ? port.connections : [];
+
+                connections.forEach(conn => {
+                    const upstreamNode = window.tgButtonEditor.getNodeById(conn.node);
+                    const upstreamAction = upstreamNode && upstreamNode.data ? upstreamNode.data.action : null;
+                    if (!upstreamAction || upstreamAction.id !== 'branch_condition') return;
+
+                    const outputIndex = parseInt(String(conn.output).replace('output_', ''), 10) - 1;
+                    if (Number.isNaN(outputIndex)) return;
+
+                    const upstreamOutputs = upstreamAction.outputs || [];
+                    const upstreamOutput = upstreamOutputs[outputIndex];
+                    if (!upstreamOutput || !upstreamOutput.name) return;
+
+                    links.push({
+                        paramName: param.name,
+                        paramLabel: `${param.name}${param.type ? ` (${param.type})` : ''}`,
+                        upstreamOutputName: upstreamOutput.name,
+                        expression: `{{ inputs.${param.name} }}`,
+                    });
+                });
+            });
+
+            return links;
+        };
+
+        const branchConditionLinks = detectBranchConditionLinks();
+        const preferredBranchLink = branchConditionLinks.find(link => link.upstreamOutputName === 'result')
+            || branchConditionLinks[0]
+            || null;
+
         const renderConditionFields = () => {
             conditionDetailsWrapper.innerHTML = '';
             if (conditionMode === 'none') {
@@ -871,6 +911,9 @@
             }
 
             if (conditionMode === 'template') {
+                if (!conditionTemplateValue.trim() && preferredBranchLink) {
+                    conditionTemplateValue = preferredBranchLink.expression;
+                }
                 const textarea = createTextarea(conditionTemplateValue, (val) => {
                     conditionTemplateValue = val;
                 });
@@ -904,6 +947,38 @@
                 conditionDetailsWrapper.appendChild(textarea);
                 conditionDetailsWrapper.appendChild(hint);
                 conditionDetailsWrapper.appendChild(usage);
+
+                if (branchConditionLinks.length > 0) {
+                    const branchHint = document.createElement('p');
+                    branchHint.className = 'field-description muted';
+                    branchHint.style.margin = '4px 0 0 0';
+                    branchHint.innerHTML = '已检测到上游的“条件判断”节点，可直接引用其输出：'
+                        + branchConditionLinks.map(link => `<code>${link.expression}</code>${link.upstreamOutputName === 'negated_result' ? '（取反结果）' : link.upstreamOutputName === 'result' ? '（判断结果）' : ''}`).join('、');
+                    conditionDetailsWrapper.appendChild(branchHint);
+
+                    const quickFillWrapper = document.createElement('div');
+                    quickFillWrapper.style.margin = '6px 0 0 0';
+                    quickFillWrapper.style.display = 'flex';
+                    quickFillWrapper.style.flexWrap = 'wrap';
+                    quickFillWrapper.style.gap = '6px';
+
+                    branchConditionLinks.forEach(link => {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'secondary';
+                        btn.textContent = link.upstreamOutputName === 'negated_result'
+                            ? `使用 ${link.paramName}（否定）`
+                            : `使用 ${link.paramName}`;
+                        btn.onclick = () => {
+                            conditionTemplateValue = link.expression;
+                            textarea.value = link.expression;
+                            textarea.focus();
+                        };
+                        quickFillWrapper.appendChild(btn);
+                    });
+
+                    conditionDetailsWrapper.appendChild(quickFillWrapper);
+                }
                 return;
             }
 
@@ -997,6 +1072,37 @@
                         field.appendChild(label);
                         field.appendChild(inputContainer);
 
+                    } else if (Array.isArray(param.choices) && param.choices.length > 0) {
+                        const value = isConnected
+                            ? ''
+                            : (currentData[paramName] ?? (param.default ?? ''));
+                        const select = document.createElement('select');
+                        select.dataset.paramName = paramName;
+                        select.disabled = isConnected;
+
+                        if (!param.required) {
+                            const placeholderOption = document.createElement('option');
+                            placeholderOption.value = '';
+                            placeholderOption.textContent = '（请选择）';
+                            select.appendChild(placeholderOption);
+                        }
+
+                        (param.choices || []).forEach(choice => {
+                            const optionEl = document.createElement('option');
+                            optionEl.value = choice.value ?? '';
+                            optionEl.textContent = choice.label ?? choice.value ?? '';
+                            select.appendChild(optionEl);
+                        });
+
+                        if (!select.value) {
+                            select.value = value || '';
+                        } else {
+                            select.value = value || select.value;
+                        }
+
+                        inputContainer.appendChild(select);
+
+                        field = createField(paramLabel, inputContainer);
                     } else if (param.type === 'button') {
                         const value = isConnected
                             ? ''
@@ -1120,10 +1226,10 @@
             } else if (conditionMode === 'template') {
                 const trimmed = (conditionTemplateValue || '').trim();
                 if (!trimmed) {
-                    delete finalData.__condition__;
-                } else {
-                    finalData.__condition__ = trimmed;
+                    showInfoModal('模板条件不能为空，请填写表达式后再保存。', true);
+                    return;
                 }
+                finalData.__condition__ = trimmed;
             } else if (conditionMode === 'json') {
                 const raw = conditionJsonValue || '';
                 if (!raw.trim()) {

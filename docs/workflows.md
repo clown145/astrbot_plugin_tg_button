@@ -180,7 +180,7 @@
 
 1.  在分支前插入一个「条件判断」节点，配置好比较逻辑，并为 `result_variable` 取一个易记的名字（例如 `should_notify`）。
 2.  将该节点的 `result` 输出连接到下游节点任意一个暂不使用的输入端口，或者直接依赖它在全局变量中的别名。
-3.  在下游节点的条件设置面板中，选择“模板表达式”或“高级 JSON”，写入 `{{ inputs.should_notify }}`（如果走连接方式）或 `{{ variables.should_notify }}`（如果只依赖全局变量）。
+3.  在下游节点的条件设置面板中，将条件类型切换为“模板表达式”。如果检测到上游连接了「条件判断」节点，文本框会自动填入如 `{{ inputs.should_notify }}` 的模板，并提供一键填充按钮；若只依赖全局变量，则改写为 `{{ variables.should_notify }}` 即可。
 
 保存后，调度器会自动识别 `inputs.*` 或 `variables.*` 中的布尔值，并根据结果决定是否执行当前节点。
 
@@ -222,7 +222,7 @@
 *   **功能**: 读取上游节点或静态填写的两个值进行比较，输出布尔结果和其反向值，可作为工作流分支的判定入口。
 *   **输入**:
     *   `left` (any): 左值，可以通过连接线或静态参数提供。
-    *   `operator` (string): 比较运算符，支持 `equals`、`not_equals`、`greater`、`less_or_equal`、`contains`、`matches` 等常见写法。
+*   `operator` (string): 通过下拉框选择比较运算符（带中文提示），支持 `equals`、`not_equals`、`greater`、`less_or_equal`、`contains`、`matches` 等常见写法。
     *   `right` (any): 右值，部分运算符（如 `is_truthy`）可以留空。
     *   `case_insensitive` (boolean): 是否忽略大小写。
     *   `interpret_numbers` (boolean): 是否在比较前尝试将字符串转换为数字。
@@ -234,6 +234,7 @@
 *   **用法提示**:
     *   将 `result` 输出连接到目标节点未使用的输入端口，可在节点条件中通过 `{{ inputs.端口名 }}` 读取。
     *   若只想引用全局变量，可设置 `result_variable`，无需额外连接线，直接写 `{{ variables.别名 }}` 即可。
+    *   条件配置面板会自动识别来自「条件判断」的布尔输出，并在“模板表达式”模式下提供快速填充按钮，避免手动输入表达式；即便多个分支共享同一个上游数据节点，也只会执行与布尔结果匹配的分支。
 
 ---
 
