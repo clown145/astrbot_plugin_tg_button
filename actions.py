@@ -497,6 +497,22 @@ class ActionExecutor:
                 )
                 rendered = await self._arender_template(template_str, context)
                 value = self._interpret_condition_value(rendered)
+            elif cond_type in {"input", "port", "input_ref"}:
+                input_name = (
+                    condition_cfg.get("name")
+                    or condition_cfg.get("input")
+                    or condition_cfg.get("field")
+                )
+                if not input_name:
+                    raise ValueError("输入条件缺少 name/input 字段")
+                input_value = context.get("inputs", {}).get(str(input_name))
+                if input_value is None:
+                    fallback = condition_cfg.get("fallback")
+                    if "fallback" in condition_cfg:
+                        input_value = fallback
+                    elif "default" in condition_cfg:
+                        input_value = condition_cfg.get("default")
+                value = self._interpret_condition_value(input_value)
             elif cond_type == "value":
                 value = self._interpret_condition_value(condition_cfg.get("value"))
             elif cond_type == "variable":

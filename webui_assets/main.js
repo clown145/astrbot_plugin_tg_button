@@ -753,50 +753,8 @@
         const conditionIntro = document.createElement('p');
         conditionIntro.className = 'field-description muted';
         conditionIntro.style.margin = '0 0 12px 0';
-        conditionIntro.textContent = '可以在这里设置该节点的触发条件；当条件不成立时，节点以及所有下游节点都会被跳过。推荐在上游使用“条件判断 (Condition Check)”模块先计算布尔值，再在这里通过模板引用。';
+        conditionIntro.textContent = '可以在这里设置该节点的触发条件；当条件不成立时，节点以及所有下游节点都会被跳过。除了手动填写模板，还可以直接选择上游连线提供的布尔值。';
         body.appendChild(conditionIntro);
-
-        const detectConditionMode = (value) => {
-            if (value === undefined || value === null) return 'none';
-            if (typeof value === 'boolean') return 'boolean';
-            if (typeof value === 'string') return 'template';
-            return 'json';
-        };
-
-        let conditionMode = detectConditionMode(conditionConfig);
-        let conditionBoolValue = typeof conditionConfig === 'boolean' ? conditionConfig : true;
-        let conditionTemplateValue = typeof conditionConfig === 'string' ? conditionConfig : '';
-        let conditionJsonValue = conditionMode === 'json'
-            ? (() => {
-                try {
-                    return JSON.stringify(conditionConfig, null, 2);
-                } catch (err) {
-                    console.warn('无法格式化条件配置，将使用原始值。', err);
-                    return String(conditionConfig ?? '');
-                }
-            })()
-            : '';
-
-        const conditionModeSelect = document.createElement('select');
-        [
-            { value: 'none', label: '不设置条件（始终执行）' },
-            { value: 'boolean', label: '简单布尔值' },
-            { value: 'template', label: '模板表达式（Jinja2）' },
-            { value: 'json', label: '高级 JSON 配置' },
-        ].forEach(opt => {
-            const optionEl = document.createElement('option');
-            optionEl.value = opt.value;
-            optionEl.textContent = opt.label;
-            conditionModeSelect.appendChild(optionEl);
-        });
-        conditionModeSelect.value = conditionMode;
-
-        const conditionModeField = createField('条件类型', conditionModeSelect);
-        body.appendChild(conditionModeField);
-
-        const conditionDetailsWrapper = document.createElement('div');
-        const conditionDetailsField = createField('条件配置', conditionDetailsWrapper);
-        body.appendChild(conditionDetailsField);
 
         const actionInputs = action.isModular
             ? (action.inputs || [])
@@ -833,7 +791,7 @@
 
         const cachedButtonOptions = buildButtonOptions();
 
-        const detectBranchConditionLinks = () => {
+        const collectConditionLinks = () => {
             if (!window.tgButtonEditor || typeof window.tgButtonEditor.getNodeById !== 'function') {
                 return [];
             }
@@ -847,19 +805,25 @@
                 connections.forEach(conn => {
                     const upstreamNode = window.tgButtonEditor.getNodeById(conn.node);
                     const upstreamAction = upstreamNode && upstreamNode.data ? upstreamNode.data.action : null;
-                    if (!upstreamAction || upstreamAction.id !== 'branch_condition') return;
+                    if (!upstreamAction) return;
 
                     const outputIndex = parseInt(String(conn.output).replace('output_', ''), 10) - 1;
                     if (Number.isNaN(outputIndex)) return;
 
                     const upstreamOutputs = upstreamAction.outputs || [];
-                    const upstreamOutput = upstreamOutputs[outputIndex];
-                    if (!upstreamOutput || !upstreamOutput.name) return;
+                    const upstreamOutput = upstreamOutputs[outputIndex] || {};
+                    const upstreamOutputName = upstreamOutput.name || conn.output || `output_${outputIndex + 1}`;
 
                     links.push({
                         paramName: param.name,
                         paramLabel: `${param.name}${param.type ? ` (${param.type})` : ''}`,
-                        upstreamOutputName: upstreamOutput.name,
+                        paramType: param.type || '',
+                        upstreamNodeId: conn.node,
+                        upstreamNodeName: upstreamAction.name || upstreamAction.id || conn.node,
+                        upstreamActionId: upstreamAction.id,
+                        upstreamOutputName,
+                        upstreamOutputLabel: upstreamOutput.description || upstreamOutputName,
+                        upstreamOutputType: upstreamOutput.type || '',
                         expression: `{{ inputs.${param.name} }}`,
                     });
                 });
@@ -868,10 +832,90 @@
             return links;
         };
 
-        const branchConditionLinks = detectBranchConditionLinks();
-        const preferredBranchLink = branchConditionLinks.find(link => link.upstreamOutputName === 'result')
+        const conditionLinks = collectConditionLinks();
+        const branchConditionLinks = conditionLinks.filter(link => link.upstreamActionId === 'branch_condition');
+        const booleanConditionLinks = conditionLinks.filter(link => {
+            const outputType = (link.upstreamOutputType || '').toLowerCase();
+            const paramType = (link.paramType || '').toLowerCase();
+            return (
+                link.upstreamActionId === 'branch_condition'
+                || outputType === 'boolean'
+                || outputType === 'bool'
+                || paramType === 'boolean'
+            );
+        });
+
+        let linkedConditionTarget = '';
+        let linkedConditionNegate = false;
+        const preferredConditionLink = branchConditionLinks.find(link => link.upstreamOutputName === 'result')
             || branchConditionLinks[0]
+            || booleanConditionLinks[0]
             || null;
+
+        const detectConditionMode = (value) => {
+            if (value === undefined || value === null) return 'none';
+            if (typeof value === 'boolean') return 'boolean';
+            if (typeof value === 'string') return 'template';
+            if (value && typeof value === 'object') {
+                const typeHint = String(value.type || value.kind || '').toLowerCase();
+                if (typeHint === 'input' || typeHint === 'port' || typeHint === 'input_ref') {
+                    return 'linked';
+                }
+            }
+            return 'json';
+        };
+
+        let conditionMode = detectConditionMode(conditionConfig);
+        let conditionBoolValue = typeof conditionConfig === 'boolean' ? conditionConfig : true;
+        let conditionTemplateValue = typeof conditionConfig === 'string' ? conditionConfig : '';
+        let conditionJsonValue = conditionMode === 'json'
+            ? (() => {
+                try {
+                    return JSON.stringify(conditionConfig, null, 2);
+                } catch (err) {
+                    console.warn('无法格式化条件配置，将使用原始值。', err);
+                    return String(conditionConfig ?? '');
+                }
+            })()
+            : '';
+
+        if (conditionMode === 'linked' && booleanConditionLinks.length === 0) {
+            conditionMode = 'template';
+        }
+        if (conditionMode === 'linked' && conditionConfig && typeof conditionConfig === 'object') {
+            linkedConditionTarget = String(conditionConfig.name ?? conditionConfig.input ?? conditionConfig.field ?? '');
+            linkedConditionNegate = Boolean(conditionConfig.negate);
+        }
+
+        const conditionModeSelect = document.createElement('select');
+        const conditionModeOptions = [
+            { value: 'none', label: '不设置条件（始终执行）' },
+            { value: 'boolean', label: '简单布尔值' },
+        ];
+        if (booleanConditionLinks.length > 0) {
+            conditionModeOptions.push({ value: 'linked', label: '来自上游连线' });
+        }
+        conditionModeOptions.push(
+            { value: 'template', label: '模板表达式（Jinja2）' },
+            { value: 'json', label: '高级 JSON 配置' },
+        );
+        conditionModeOptions.forEach(opt => {
+            const optionEl = document.createElement('option');
+            optionEl.value = opt.value;
+            optionEl.textContent = opt.label;
+            conditionModeSelect.appendChild(optionEl);
+        });
+        if (!conditionModeOptions.some(opt => opt.value === conditionMode)) {
+            conditionMode = 'template';
+        }
+        conditionModeSelect.value = conditionMode;
+
+        const conditionModeField = createField('条件类型', conditionModeSelect);
+        body.appendChild(conditionModeField);
+
+        const conditionDetailsWrapper = document.createElement('div');
+        const conditionDetailsField = createField('条件配置', conditionDetailsWrapper);
+        body.appendChild(conditionDetailsField);
 
         const renderConditionFields = () => {
             conditionDetailsWrapper.innerHTML = '';
@@ -910,9 +954,109 @@
                 return;
             }
 
+            if (conditionMode === 'linked') {
+                if (booleanConditionLinks.length === 0) {
+                    const tip = document.createElement('p');
+                    tip.className = 'field-description muted';
+                    tip.style.margin = '4px 0 0 0';
+                    tip.textContent = '未检测到可用的布尔连线，请先将上游节点的布尔输出连接到当前节点的任一输入端口。';
+                    conditionDetailsWrapper.appendChild(tip);
+                    return;
+                }
+
+                if (!linkedConditionTarget) {
+                    const defaultLink = (preferredConditionLink && booleanConditionLinks.find(link => link.paramName === preferredConditionLink.paramName))
+                        || booleanConditionLinks[0];
+                    linkedConditionTarget = defaultLink ? defaultLink.paramName : '';
+                }
+
+                const list = document.createElement('div');
+                list.className = 'linked-condition-list';
+                list.style.display = 'flex';
+                list.style.flexDirection = 'column';
+                list.style.gap = '8px';
+
+                booleanConditionLinks.forEach(link => {
+                    const option = document.createElement('label');
+                    option.className = 'linked-condition-option';
+                    option.style.display = 'flex';
+                    option.style.flexDirection = 'column';
+                    option.style.gap = '4px';
+                    option.style.padding = '8px';
+                    option.style.border = '1px solid var(--border-color)';
+                    option.style.borderRadius = '6px';
+
+                    const row = document.createElement('div');
+                    row.style.display = 'flex';
+                    row.style.alignItems = 'center';
+                    row.style.gap = '8px';
+
+                    const radio = document.createElement('input');
+                    radio.type = 'radio';
+                    radio.name = 'linked-condition-target';
+                    radio.value = link.paramName;
+                    radio.checked = linkedConditionTarget === link.paramName;
+                    radio.onchange = () => {
+                        linkedConditionTarget = link.paramName;
+                    };
+
+                    const info = document.createElement('div');
+                    info.style.flex = '1';
+                    info.innerHTML = `<strong>${link.upstreamNodeName}</strong> · ${link.upstreamOutputLabel}`;
+
+                    const copyBtn = document.createElement('button');
+                    copyBtn.type = 'button';
+                    copyBtn.className = 'secondary';
+                    copyBtn.textContent = '复制模板';
+                    copyBtn.onclick = async () => {
+                        try {
+                            await navigator.clipboard.writeText(link.expression);
+                            showInfoModal('已复制模板表达式。');
+                        } catch (err) {
+                            console.warn('复制模板失败', err);
+                            showInfoModal('复制失败，请手动选择后复制。', true);
+                        }
+                    };
+
+                    row.append(radio, info, copyBtn);
+
+                    const hint = document.createElement('div');
+                    hint.className = 'field-description muted';
+                    hint.innerHTML = `对应输入：<code>${link.paramLabel}</code><br>模板：<code>${link.expression}</code>`;
+
+                    option.append(row, hint);
+                    list.appendChild(option);
+                });
+
+                conditionDetailsWrapper.appendChild(list);
+
+                const negateWrapper = document.createElement('label');
+                negateWrapper.style.display = 'flex';
+                negateWrapper.style.alignItems = 'center';
+                negateWrapper.style.gap = '8px';
+                negateWrapper.style.marginTop = '8px';
+
+                const negateCheckbox = document.createElement('input');
+                negateCheckbox.type = 'checkbox';
+                negateCheckbox.checked = linkedConditionNegate;
+                negateCheckbox.onchange = (e) => {
+                    linkedConditionNegate = e.target.checked;
+                };
+
+                negateWrapper.append(negateCheckbox, document.createTextNode('取反条件（布尔值为 False 时执行节点）'));
+                conditionDetailsWrapper.appendChild(negateWrapper);
+
+                const tip = document.createElement('p');
+                tip.className = 'field-description muted';
+                tip.style.margin = '6px 0 0 0';
+                tip.textContent = '保存后将直接读取所选输入端口的布尔值，避免手动维护模板表达式。';
+                conditionDetailsWrapper.appendChild(tip);
+                return;
+            }
+
             if (conditionMode === 'template') {
-                if (!conditionTemplateValue.trim() && preferredBranchLink) {
-                    conditionTemplateValue = preferredBranchLink.expression;
+                if (!conditionTemplateValue.trim() && preferredConditionLink) {
+                    conditionTemplateValue = preferredConditionLink.expression;
                 }
                 const textarea = createTextarea(conditionTemplateValue, (val) => {
                     conditionTemplateValue = val;
@@ -936,24 +1080,24 @@
                     }
                 });
                 if (connectedInputs.length > 0) {
-                    usage.textContent = `已连接的输入：${connectedInputs.join('、')}。可通过 {{ inputs.参数名 }} 读取对应值，或使用 {{ variables.别名 }} 访问全局变量。`;
+                    usage.textContent = `已连接的输入：${connectedInputs.join('、')}。可通过 {{ inputs.参数名 }} 读取对应值，或使用 {{ variables.别名 }} 访问全局变量。也可以切换到“来自上游连线”条件类型直接复用这些布尔值。`;
                 } else if ((actionInputs || []).length > 0) {
                     const names = actionInputs.map(param => param.name).join('、 ');
-                    usage.textContent = `当前动作支持的输入包含：${names}。当某个输入连接了上游节点后，可在模板中写 {{ inputs.参数名 }} 读取。`;
+                    usage.textContent = `当前动作支持的输入包含：${names}。当某个输入连接了上游节点后，可在模板中写 {{ inputs.参数名 }} 读取，或直接在条件类型中选择“来自上游连线”。`;
                 } else {
-                    usage.textContent = '如果只依赖全局变量，可以直接写 {{ variables.变量名 }}；若需要来自上游的布尔值，可将“条件判断”模块的输出连到任意输入端口。';
+                    usage.textContent = '如果只依赖全局变量，可以直接写 {{ variables.变量名 }}；若需要来自上游的布尔值，可先连线后使用“来自上游连线”条件类型完成配置。';
                 }
 
                 conditionDetailsWrapper.appendChild(textarea);
                 conditionDetailsWrapper.appendChild(hint);
                 conditionDetailsWrapper.appendChild(usage);
 
-                if (branchConditionLinks.length > 0) {
+                if (booleanConditionLinks.length > 0) {
                     const branchHint = document.createElement('p');
                     branchHint.className = 'field-description muted';
                     branchHint.style.margin = '4px 0 0 0';
-                    branchHint.innerHTML = '已检测到上游的“条件判断”节点，可直接引用其输出：'
-                        + branchConditionLinks.map(link => `<code>${link.expression}</code>${link.upstreamOutputName === 'negated_result' ? '（取反结果）' : link.upstreamOutputName === 'result' ? '（判断结果）' : ''}`).join('、');
+                    branchHint.innerHTML = '检测到可用的布尔来源：'
+                        + booleanConditionLinks.map(link => `<span><code>${link.expression}</code> — ${link.upstreamNodeName} · ${link.upstreamOutputLabel}</span>`).join('、');
                     conditionDetailsWrapper.appendChild(branchHint);
 
                     const quickFillWrapper = document.createElement('div');
@@ -962,13 +1106,12 @@
                     quickFillWrapper.style.flexWrap = 'wrap';
                     quickFillWrapper.style.gap = '6px';
 
-                    branchConditionLinks.forEach(link => {
+                    booleanConditionLinks.forEach(link => {
                         const btn = document.createElement('button');
                         btn.type = 'button';
                         btn.className = 'secondary';
-                        btn.textContent = link.upstreamOutputName === 'negated_result'
-                            ? `使用 ${link.paramName}（否定）`
-                            : `使用 ${link.paramName}`;
+                        btn.textContent = `${link.upstreamNodeName} → ${link.upstreamOutputName}`;
+                        btn.title = link.expression;
                         btn.onclick = () => {
                             conditionTemplateValue = link.expression;
                             textarea.value = link.expression;
@@ -1223,6 +1366,19 @@
                 delete finalData.__condition__;
             } else if (conditionMode === 'boolean') {
                 finalData.__condition__ = conditionBoolValue;
+            } else if (conditionMode === 'linked') {
+                if (!linkedConditionTarget) {
+                    showInfoModal('请选择一个布尔连线作为条件。', true);
+                    return;
+                }
+                const linkedPayload = {
+                    type: 'input',
+                    name: linkedConditionTarget,
+                };
+                if (linkedConditionNegate) {
+                    linkedPayload.negate = true;
+                }
+                finalData.__condition__ = linkedPayload;
             } else if (conditionMode === 'template') {
                 const trimmed = (conditionTemplateValue || '').trim();
                 if (!trimmed) {
