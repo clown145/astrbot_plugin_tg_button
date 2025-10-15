@@ -6,7 +6,7 @@
 
 ## 1. 模块化动作是什么？
 
-一个模块化动作本质上就是一个遵循特定规范的 Python (`.py`) 文件。插件在启动或重载时会自动扫描 `data/plugins/astrbot_plugin_tg_button/modular_actions/` 目录，并加载所有符合规范的动作文件。
+一个模块化动作本质上就是一个遵循特定规范的 Python (`.py`) 文件。插件在启动或重载时会自动扫描 `data/plugin_data/astrbot_plugin_tg_button/modular_actions/` 目录，并加载所有符合规范的动作文件。
 
 每个动作文件都必须包含两个核心部分：
 
