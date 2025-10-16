@@ -65,23 +65,20 @@
     <div id="tab-workflow" class="tab-content">
       <section id="workflowSection">
         <div class="workflow-section-header">
-          <div class="workflow-header-bar">
-            <h2>工作流编辑器</h2>
-            <div class="workflow-header-actions">
-              <div class="workflow-primary-actions">
-                <button id="newWorkflowBtn" type="button">新建</button>
-                <select id="workflowSelector" class="secondary" aria-label="选择现有工作流"></select>
-                <label for="workflowNameInput" class="visually-hidden">工作流名称</label>
-                <input type="text" id="workflowNameInput" placeholder="输入工作流名称" aria-label="工作流名称">
-                <button id="editWorkflowDescriptionBtn" class="secondary" type="button">描述</button>
-              </div>
-              <div class="workflow-secondary-actions">
-                <button id="saveWorkflowBtn" class="secondary" type="button">保存当前工作流</button>
-                <button id="deleteWorkflowBtn" class="danger" type="button">删除</button>
-              </div>
+          <h2 class="workflow-title">工作流编辑器</h2>
+          <div class="workflow-header-actions">
+            <div class="workflow-primary-actions">
+              <button id="newWorkflowBtn" type="button">新建</button>
+              <select id="workflowSelector" class="secondary" aria-label="选择现有工作流"></select>
+              <label for="workflowNameInput" class="visually-hidden">工作流名称</label>
+              <input type="text" id="workflowNameInput" placeholder="输入工作流名称" aria-label="工作流名称">
+              <button id="editWorkflowDescriptionBtn" class="secondary workflow-description-btn" type="button" aria-haspopup="dialog" data-has-description="false">描述</button>
+            </div>
+            <div class="workflow-secondary-actions">
+              <button id="saveWorkflowBtn" class="secondary" type="button">保存当前工作流</button>
+              <button id="deleteWorkflowBtn" class="danger" type="button">删除</button>
             </div>
           </div>
-          <p id="workflowDescriptionPreview" class="workflow-description-preview muted" data-empty="true">尚未添加描述。</p>
         </div>
         <input type="hidden" id="workflowDescriptionInput">
         <div class="workflow-editor-body">

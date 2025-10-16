@@ -63,7 +63,6 @@ window.addEventListener('DOMContentLoaded', () => {
     const uploadPaletteInput = document.getElementById('nodePaletteUploadInput');
     const workflowCanvasWrapper = document.querySelector('.workflow-canvas-wrapper');
     const workflowDescriptionButton = document.getElementById('editWorkflowDescriptionBtn');
-    const workflowDescriptionPreview = document.getElementById('workflowDescriptionPreview');
     const workflowPaletteContainer = document.querySelector('.node-palette-container');
 
     if (!nodePalette || !nodePaletteList) {
@@ -546,16 +545,11 @@ window.addEventListener('DOMContentLoaded', () => {
         if (workflowDescriptionInput) {
             workflowDescriptionInput.value = normalized;
         }
-        if (!workflowDescriptionPreview) {
-            return;
-        }
-        const trimmed = normalized.trim();
-        if (!trimmed) {
-            workflowDescriptionPreview.textContent = '尚未添加描述。';
-            workflowDescriptionPreview.dataset.empty = 'true';
-        } else {
-            workflowDescriptionPreview.textContent = trimmed.replace(/\s+/g, ' ');
-            workflowDescriptionPreview.dataset.empty = 'false';
+        if (workflowDescriptionButton) {
+            const trimmed = normalized.trim();
+            const sanitized = trimmed.replace(/\s+/g, ' ');
+            workflowDescriptionButton.dataset.hasDescription = trimmed ? 'true' : 'false';
+            workflowDescriptionButton.setAttribute('title', trimmed ? `描述：${sanitized}` : '为当前工作流添加描述');
         }
     };
 
@@ -595,6 +589,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (isNarrow) {
             workflowPaletteContainer.style.height = '';
             workflowPaletteContainer.style.minHeight = '';
+            workflowPaletteContainer.style.maxHeight = '';
             return;
         }
 
@@ -602,6 +597,11 @@ window.addEventListener('DOMContentLoaded', () => {
         if (canvasHeight > 0) {
             workflowPaletteContainer.style.height = `${canvasHeight}px`;
             workflowPaletteContainer.style.minHeight = `${canvasHeight}px`;
+            workflowPaletteContainer.style.maxHeight = `${canvasHeight}px`;
+        } else {
+            workflowPaletteContainer.style.height = '';
+            workflowPaletteContainer.style.minHeight = '';
+            workflowPaletteContainer.style.maxHeight = '';
         }
     };
 
