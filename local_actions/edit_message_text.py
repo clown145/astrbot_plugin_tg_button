@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Dict, Any
 if TYPE_CHECKING:
     from ..main import DynamicButtonFrameworkPlugin
 
+from ..telegram_format import build_parse_mode_input, map_to_telegram_parse_mode
+
 # --- 动作元数据 ---
 ACTION_METADATA = {
     "id": "edit_message_text",
@@ -29,6 +31,10 @@ ACTION_METADATA = {
             "required": True,
             "description": "要更新到的新文本内容。",
         },
+        build_parse_mode_input(
+            description="更新消息时使用的 Telegram 解析模式。",
+            default="html",
+        ),
     ],
     "outputs": [
         {
@@ -46,6 +52,7 @@ async def execute(
     chat_id: str,
     message_id: int,
     text: str,
+    parse_mode: str = "html",
 ) -> Dict[str, Any]:
     """
     立即执行更新消息文本的操作，并返回 message_id。
@@ -56,12 +63,17 @@ async def execute(
         raise RuntimeError("无法获取 Telegram 客户端实例。")
 
     # 2. 调用 API 更新消息
+    tg_parse_mode = map_to_telegram_parse_mode(parse_mode)
+    kwargs: Dict[str, Any] = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+    }
+    if tg_parse_mode:
+        kwargs["parse_mode"] = tg_parse_mode
+
     try:
-        await client.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=text,
-        )
+        await client.edit_message_text(**kwargs)
     except Exception as e:
         plugin.logger.error(f"更新消息时出错: {e}", exc_info=True)
         raise RuntimeError(f"调用 Telegram API 更新消息失败: {e}")

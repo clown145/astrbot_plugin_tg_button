@@ -6,6 +6,8 @@ if TYPE_CHECKING:
     from ..main import DynamicButtonFrameworkPlugin
     from ..actions import RuntimeContext
 
+from ..telegram_format import build_parse_mode_input, map_to_telegram_parse_mode
+
 # --- 动作元数据 (新版) ---
 ACTION_METADATA = {
     "id": "send_message",
@@ -30,6 +32,10 @@ ACTION_METADATA = {
             "required": False,
             "description": "要发送的语音的**本地文件路径**。通常来自 `cache_from_url` 动作的输出。",
         },
+        build_parse_mode_input(
+            description="发送文本或说明文字时使用的 Telegram 解析模式。",
+            default="html",
+        ),
         {
             "name": "chat_id",
             "type": "string",
@@ -54,6 +60,7 @@ async def execute(
     text: str = None,
     image_source: str = None,
     voice_source: str = None,
+    parse_mode: str = "html",
 ) -> Dict[str, Any]:
     """
     【已重构】立即执行发送消息的操作，并返回 message_id。
@@ -70,19 +77,32 @@ async def execute(
     sent_message = None
 
     # 3. 根据内容调用不同的 API
+    tg_parse_mode = map_to_telegram_parse_mode(parse_mode)
+    parse_mode_kwargs = {"parse_mode": tg_parse_mode} if tg_parse_mode else {}
+
     try:
         if image_source:
             with open(image_source, "rb") as photo_payload:
                 sent_message = await client.send_photo(
-                    chat_id=chat_id, photo=photo_payload, caption=caption
+                    chat_id=chat_id,
+                    photo=photo_payload,
+                    caption=caption,
+                    **parse_mode_kwargs,
                 )
         elif voice_source:
             with open(voice_source, "rb") as voice_payload:
                 sent_message = await client.send_voice(
-                    chat_id=chat_id, voice=voice_payload, caption=caption
+                    chat_id=chat_id,
+                    voice=voice_payload,
+                    caption=caption,
+                    **parse_mode_kwargs,
                 )
         elif caption:
-            sent_message = await client.send_message(chat_id=chat_id, text=caption)
+            sent_message = await client.send_message(
+                chat_id=chat_id,
+                text=caption,
+                **parse_mode_kwargs,
+            )
         else:
             # 没有发送任何内容，可以选择静默返回或报错
             return {}  # 返回空字典，表示没有输出

@@ -16,6 +16,8 @@ import httpx
 from jinja2 import Environment, StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
 
+from .telegram_format import map_to_telegram_parse_mode
+
 try:
     import jmespath
 except ImportError:  # 可选依赖
@@ -212,7 +214,7 @@ class ActionExecutor:
                 success=True,
                 should_edit_message=bool(result_dict.get("new_text")),
                 new_text=result_dict.get("new_text"),
-                parse_mode=self._map_parse_mode(result_dict.get("parse_mode", "html")),
+                parse_mode=map_to_telegram_parse_mode(result_dict.get("parse_mode", "html")),
                 next_menu_id=result_dict.get("next_menu_id"),
                 button_overrides=result_dict.get("button_overrides", []),
                 notification=result_dict.get("notification"),
@@ -707,7 +709,7 @@ class ActionExecutor:
                 success=True,
                 should_edit_message=bool(result.get("new_text")),
                 new_text=result.get("new_text"),
-                parse_mode=self._map_parse_mode(result.get("parse_mode", "html")),
+                parse_mode=map_to_telegram_parse_mode(result.get("parse_mode", "html")),
                 next_menu_id=result.get("next_menu_id"),
                 button_overrides=result.get("button_overrides", []),
                 notification=result.get("notification"),
@@ -1137,7 +1139,7 @@ class ActionExecutor:
             parse_mode_alias = str(render_cfg.get("format", "html")).lower()
             should_edit = bool(render_cfg.get("update_message", True))
             next_menu_id = render_cfg.get("next_menu_id")
-        parse_mode = self._map_parse_mode(parse_mode_alias)
+        parse_mode = map_to_telegram_parse_mode(parse_mode_alias)
         button_title_template = render_cfg.get("button_title_template")
         overrides_cfg: List[Dict[str, Any]] = []
         if isinstance(message_cfg, dict) and message_cfg.get("button_overrides"):
@@ -1192,15 +1194,6 @@ class ActionExecutor:
             button_title=overrides_self_text,
             button_overrides=overrides,
         )
-
-    def _map_parse_mode(self, alias: str) -> Optional[str]:
-        if alias in {"markdown", "md"}:
-            return "Markdown"
-        if alias in {"markdownv2", "mdv2"}:
-            return "MarkdownV2"
-        if alias == "html":
-            return "HTML"
-        return None
 
     async def _aapply_extractor(
         self, extractor_type: str, expression: str, response: Optional[httpx.Response]

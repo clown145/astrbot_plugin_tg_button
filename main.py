@@ -51,6 +51,7 @@ from . import commands
 from . import handlers
 from . import local_actions
 from .actions import ActionExecutor
+from .telegram_format import canonical_parse_mode_alias, map_to_telegram_parse_mode
 from .storage import (
     ButtonStore,
     ButtonsModel,
@@ -439,27 +440,15 @@ class DynamicButtonFrameworkPlugin(Star):
                 "user_input_is_cancelled": False,
             }
 
-        def _map_parse_mode(value: Optional[str]) -> Optional[str]:
-            if not value:
-                return "HTML"
-            lowered = value.strip().lower()
-            if lowered in ("", "none", "plain"):
-                return None
-            if lowered in ("markdownv2", "mdv2"):
-                return "MarkdownV2"
-            if lowered in ("markdown", "md"):
-                return "Markdown"
-            return "HTML"
-
-        parse_mode_value = (parse_mode or "html").strip().lower()
+        parse_mode_alias = canonical_parse_mode_alias(parse_mode)
 
         def _normalize_button_label(raw_text: Optional[str], fallback: Optional[str] = None) -> str:
             base_text = str(raw_text or "").strip()
-            if parse_mode_value == "html" and base_text:
+            if parse_mode_alias == "html" and base_text:
                 base_text = html.unescape(re.sub(r"<[^>]+>", "", base_text))
-            elif parse_mode_value in ("markdown", "md", "markdownv2", "mdv2") and base_text:
+            elif parse_mode_alias in {"markdown", "markdownv2"} and base_text:
                 cleaned = re.sub(r"[*_`~]", "", base_text)
-                if parse_mode_value in ("markdownv2", "mdv2"):
+                if parse_mode_alias == "markdownv2":
                     cleaned = cleaned.translate(
                         str.maketrans("", "", "\\[]()>\"")
                     )
@@ -472,7 +461,7 @@ class DynamicButtonFrameworkPlugin(Star):
                 base_text = base_text[:61] + "..."
             return base_text
 
-        tg_parse_mode = _map_parse_mode(parse_mode)
+        tg_parse_mode = map_to_telegram_parse_mode(parse_mode_alias)
         prompt_text = prompt or "请输入内容："
 
         display_mode_value = str(display_mode or "button_label").strip().lower()
