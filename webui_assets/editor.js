@@ -8,6 +8,54 @@ window.addEventListener('DOMContentLoaded', () => {
     const editor = new Drawflow(container);
     editor.start();
 
+    // --- 画布缩放控制 ---
+    const zoomOutBtn = document.getElementById('workflowZoomOut');
+    const zoomInBtn = document.getElementById('workflowZoomIn');
+    const zoomResetBtn = document.getElementById('workflowZoomReset');
+    const zoomDisplay = document.getElementById('workflowZoomValue');
+
+    const getZoomStep = () => (typeof editor.zoom_value === 'number' ? editor.zoom_value : 0.1);
+    const getMinZoom = () => (typeof editor.zoom_min === 'number' ? editor.zoom_min : 0.2);
+    const getMaxZoom = () => (typeof editor.zoom_max === 'number' ? editor.zoom_max : 2);
+
+    const updateZoomDisplay = (zoomValue = editor.zoom) => {
+        if (zoomDisplay) {
+            zoomDisplay.textContent = `${Math.round(zoomValue * 100)}%`;
+        }
+    };
+
+    const originalZoomRefresh = editor.zoom_refresh.bind(editor);
+    editor.zoom_refresh = function zoomRefreshWithDisplay() {
+        originalZoomRefresh();
+        updateZoomDisplay(this.zoom);
+    };
+    updateZoomDisplay(editor.zoom);
+
+    const setZoom = (targetZoom) => {
+        const clamped = Math.min(Math.max(targetZoom, getMinZoom()), getMaxZoom());
+        editor.zoom = clamped;
+        editor.zoom_refresh();
+    };
+
+    if (zoomInBtn) {
+        zoomInBtn.addEventListener('click', () => setZoom(editor.zoom + getZoomStep()));
+    }
+    if (zoomOutBtn) {
+        zoomOutBtn.addEventListener('click', () => setZoom(editor.zoom - getZoomStep()));
+    }
+    if (zoomResetBtn) {
+        zoomResetBtn.addEventListener('click', () => setZoom(1));
+    }
+
+    container.addEventListener('wheel', (event) => {
+        if (!event.ctrlKey && !event.metaKey) {
+            return;
+        }
+        event.preventDefault();
+        const direction = event.deltaY < 0 ? 1 : -1;
+        setZoom(editor.zoom + direction * getZoomStep());
+    }, { passive: false });
+
     const nodePalette = document.getElementById('node-palette');
     if (!nodePalette) {
         console.error('Node palette #node-palette not found!');

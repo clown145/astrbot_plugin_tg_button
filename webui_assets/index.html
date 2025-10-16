@@ -81,7 +81,15 @@
             <p class="muted" style="font-size: 0.8em;">从这里拖拽节点到右侧画布。</p>
             <!-- 节点列表将在此处注入 -->
           </div>
-          <div id="drawflow" style="height: 600px; flex-grow: 1; border: 1px solid #ccc; position: relative;"></div>
+          <div class="workflow-canvas-wrapper">
+            <div id="drawflow"></div>
+            <div class="workflow-zoom-controls" role="group" aria-label="画布缩放">
+              <button id="workflowZoomOut" class="secondary" type="button" title="缩小画布">-</button>
+              <span id="workflowZoomValue" class="workflow-zoom-display">100%</span>
+              <button id="workflowZoomIn" class="secondary" type="button" title="放大画布">+</button>
+              <button id="workflowZoomReset" class="secondary" type="button" title="重置缩放">重置</button>
+            </div>
+          </div>
         </div>
       </section>
     </div>
