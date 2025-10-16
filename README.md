@@ -5,13 +5,21 @@
 
 _✨ 为 AstrBot 在 Telegram 中添加交互式按钮的插件，现已更新 WebUI 以方便管理。 ✨_
 
-[![Version](https://img.shields.io/badge/Version-1.2.2-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
+[![Version](https://img.shields.io/badge/Version-1.3.0-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
 [![AstrBot](https://img.shields.io/badge/AstrBot-v4.0%2B-orange.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![GitHub](https://img.shields.io/badge/作者-clown145-blue)](https://github.com/clown145)
 
 </div>
+
+## 主要更新 (V1.3.0) - 等待用户输入体验升级
+
+*   **🆕 提示展示模式切换**: `等待用户输入` 模块化动作的“提示展示方式”现支持三种策略，可在保留按钮菜单的前提下仅修改触发按钮标题、更新菜单标题文本，或继续使用替换整条消息的旧行为。
+*   **🎛️ 一致的下拉选择**: 包括消息解析模式在内的多选参数全面改为下拉菜单，避免手动输入导致的拼写错误。
+*   **📣 更友好的默认提示**: 在按钮标题模式下会自动精简提示与结果文本，保证 Telegram 按钮标签的可读性。
+
+---
 
 ## 主要更新 (V1.2.2) - 新增消息操作动作
 

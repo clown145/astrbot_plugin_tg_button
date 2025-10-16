@@ -163,7 +163,13 @@ async def _prepare_execution_context(
         username=query.from_user.username if query.from_user else None,
         full_name=query.from_user.full_name if query.from_user else None,
         callback_data=query.data,
-        variables={"menu_id": menu.id, "menu_name": menu.name},
+        variables={
+            "menu_id": menu.id,
+            "menu_name": menu.name,
+            "button_id": button.id,
+            "button_text": button.text,
+            "menu_header_text": getattr(message, "text", None),
+        },
     )
 
     return button, menu, message, runtime, action_to_execute

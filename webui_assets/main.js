@@ -721,6 +721,111 @@
         openModal('动作测试结果', body, footer);
     }
 
+    function createConditionLinkKey(sourceNodeId, sourceOutputNameOrPort, targetInputName) {
+        return [
+            sourceNodeId != null ? String(sourceNodeId) : '',
+            sourceOutputNameOrPort != null ? String(sourceOutputNameOrPort) : '',
+            targetInputName != null ? String(targetInputName) : ''
+        ].join('::');
+    }
+
+    function collectConditionLinks(node) {
+        if (!node || !node.inputs) {
+            return [];
+        }
+
+        const action = node.data?.action || {};
+        const actionInputs = action.isModular
+            ? (action.inputs || [])
+            : (action.isLocal ? (action.parameters || []) : []);
+        const inputMetaByPort = new Map();
+        (actionInputs || []).forEach((input, index) => {
+            inputMetaByPort.set(`input_${index + 1}`, input);
+        });
+
+        const links = [];
+        Object.entries(node.inputs || {}).forEach(([portName, portData]) => {
+            const portMeta = inputMetaByPort.get(portName) || {};
+            const portIndexMatch = /input_(\d+)/.exec(portName);
+            const targetInputKey = portMeta.name || (portIndexMatch ? `input_${portIndexMatch[1]}` : portName);
+            const displayName = portMeta.name || targetInputKey;
+            const fallbackType = portMeta.type || null;
+
+            (portData?.connections || []).forEach(connection => {
+                const sourceNodeId = connection?.node != null ? String(connection.node) : null;
+                const sourcePort = connection?.output || '';
+                const upstreamNode = window.tgButtonEditor?.getNodeById
+                    ? window.tgButtonEditor.getNodeById(sourceNodeId)
+                    : null;
+                const upstreamAction = upstreamNode?.data?.action || null;
+                const upstreamOutputs = upstreamAction?.outputs || [];
+                let outputIndex = -1;
+                const portMatch = /output_(\d+)/.exec(sourcePort || '');
+                if (portMatch) {
+                    outputIndex = parseInt(portMatch[1], 10) - 1;
+                }
+                const outputMeta = outputIndex >= 0 ? upstreamOutputs?.[outputIndex] : null;
+                const outputName = outputMeta?.name || (outputIndex >= 0 ? `output_${outputIndex + 1}` : sourcePort || '');
+                const outputType = outputMeta?.type || null;
+
+                const linkKey = createConditionLinkKey(sourceNodeId, outputName || sourcePort || '', targetInputKey);
+                const sourceActionName = upstreamAction?.name || upstreamAction?.id || sourceNodeId || '未知节点';
+                const labelParts = [];
+                if (sourceActionName) labelParts.push(sourceActionName);
+                if (outputName) labelParts.push(outputName);
+                const sourceLabel = labelParts.length > 0
+                    ? labelParts.join(' → ')
+                    : `节点 ${sourceNodeId ?? '?'}`;
+                const label = `${sourceLabel} → ${displayName}`;
+
+                const templateTarget = targetInputKey.replace(/'/g, "\\'");
+                const template = `{{ inputs['${templateTarget}'] }}`;
+
+                links.push({
+                    key: linkKey,
+                    inputPort: portName,
+                    inputName: targetInputKey,
+                    inputType: fallbackType,
+                    template,
+                    sourceNodeId,
+                    sourceOutputPort: sourcePort || '',
+                    sourceOutputName: outputName || '',
+                    sourceOutputType: outputType || null,
+                    sourceActionId: upstreamAction?.id || null,
+                    label,
+                });
+            });
+        });
+
+        return links;
+    }
+
+    function filterBooleanConditionLinks(links) {
+        return (links || []).filter(link => {
+            const outputType = (link.sourceOutputType || '').toString().toLowerCase();
+            const inputType = (link.inputType || '').toString().toLowerCase();
+            const fromBranchCondition = (link.sourceActionId || '') === 'branch_condition';
+            return (
+                fromBranchCondition ||
+                outputType === 'boolean' ||
+                inputType === 'boolean'
+            );
+        });
+    }
+
+    function buildConditionModeOptions(booleanLinks) {
+        const baseOptions = [
+            { value: 'always', label: '始终执行' },
+            { value: 'expression', label: '自定义表达式' },
+        ];
+
+        if ((booleanLinks || []).length > 0) {
+            baseOptions.push({ value: 'linked', label: '来自上游连线' });
+        }
+
+        return baseOptions;
+    }
+
     function openNodeConfigModal(node) {
         if (!node || !node.data || !node.data.action) {
             console.warn("无法配置节点: 动作数据丢失。", node);
@@ -734,6 +839,107 @@
 
         const body = document.createElement('div');
         body.className = 'node-config-form';
+
+        const conditionLinks = collectConditionLinks(node);
+        const booleanConditionLinks = filterBooleanConditionLinks(conditionLinks);
+        const conditionModeOptions = buildConditionModeOptions(booleanConditionLinks);
+        const savedCondition = currentData.__condition__ || {};
+        const availableModeValues = new Set(conditionModeOptions.map(opt => opt.value));
+        let initialMode = savedCondition.mode && availableModeValues.has(savedCondition.mode)
+            ? savedCondition.mode
+            : 'always';
+
+        const conditionSection = document.createElement('div');
+        conditionSection.className = 'condition-section';
+
+        const conditionHeader = document.createElement('h4');
+        conditionHeader.textContent = '执行条件';
+        conditionHeader.style.marginTop = '0';
+        conditionSection.appendChild(conditionHeader);
+
+        const conditionModeSelect = document.createElement('select');
+        conditionModeOptions.forEach(opt => {
+            const optionEl = document.createElement('option');
+            optionEl.value = opt.value;
+            optionEl.textContent = opt.label;
+            conditionModeSelect.appendChild(optionEl);
+        });
+        conditionModeSelect.value = initialMode;
+        const conditionModeField = createField('条件模式', conditionModeSelect);
+        conditionSection.appendChild(conditionModeField);
+
+        const conditionExpressionInput = createTextarea(savedCondition.expression || '', null);
+        conditionExpressionInput.placeholder = '请输入 Jinja2 表达式，例如 {{ inputs.flag }}';
+        const conditionExpressionField = createField('模板表达式', conditionExpressionInput);
+        conditionSection.appendChild(conditionExpressionField);
+
+        let conditionLinkField = null;
+        let conditionLinkSelect = null;
+        let conditionLinkDescription = null;
+        const linkMap = new Map();
+
+        if (booleanConditionLinks.length > 0) {
+            conditionLinkSelect = document.createElement('select');
+            const placeholderOption = document.createElement('option');
+            placeholderOption.value = '';
+            placeholderOption.textContent = '请选择布尔连线';
+            conditionLinkSelect.appendChild(placeholderOption);
+
+            booleanConditionLinks.forEach(link => {
+                linkMap.set(link.key, link);
+                const option = document.createElement('option');
+                option.value = link.key;
+                option.textContent = link.label;
+                conditionLinkSelect.appendChild(option);
+            });
+
+            let savedLinkKey = '';
+            const savedLink = savedCondition.link || {};
+            if (savedLink.key) {
+                savedLinkKey = savedLink.key;
+            } else if (savedLink.source_node || savedLink.source_output || savedLink.target_input) {
+                savedLinkKey = createConditionLinkKey(
+                    savedLink.source_node,
+                    savedLink.source_output || savedLink.source_output_port || '',
+                    savedLink.target_input
+                );
+            }
+
+            if (savedLinkKey && linkMap.has(savedLinkKey)) {
+                conditionLinkSelect.value = savedLinkKey;
+            }
+
+            conditionLinkField = createField('选择布尔连线', conditionLinkSelect);
+            conditionLinkDescription = document.createElement('p');
+            conditionLinkDescription.className = 'field-description muted';
+            conditionLinkDescription.style.marginTop = '4px';
+            conditionLinkField.appendChild(conditionLinkDescription);
+            conditionSection.appendChild(conditionLinkField);
+
+            const updateLinkDescription = () => {
+                const selected = linkMap.get(conditionLinkSelect.value);
+                if (selected) {
+                    conditionLinkDescription.textContent = `将使用模板: ${selected.template}`;
+                } else {
+                    conditionLinkDescription.textContent = '';
+                }
+            };
+
+            conditionLinkSelect.addEventListener('change', updateLinkDescription);
+            updateLinkDescription();
+        }
+
+        const updateConditionVisibility = () => {
+            const mode = conditionModeSelect.value || 'always';
+            conditionExpressionField.style.display = mode === 'expression' ? '' : 'none';
+            if (conditionLinkField) {
+                conditionLinkField.style.display = mode === 'linked' ? '' : 'none';
+            }
+        };
+        conditionModeSelect.addEventListener('change', updateConditionVisibility);
+        updateConditionVisibility();
+
+        body.appendChild(conditionSection);
 
         const inputs = action.isModular ? action.inputs : (action.isLocal ? action.parameters : []);
         const outputs = action.isModular ? (action.outputs || []) : [];
@@ -765,6 +971,8 @@
 
                     let field;
 
+                    const enumValues = Array.isArray(param.enum) ? param.enum : null;
+                    const optionValues = Array.isArray(param.options) ? param.options : null;
                     if (param.type === 'boolean') {
                         const switchWrapper = document.createElement('label');
                         switchWrapper.className = 'switch-toggle';
@@ -785,7 +993,48 @@
                         label.textContent = paramLabel;
                         field.appendChild(label);
                         field.appendChild(inputContainer);
+                    } else if ((enumValues && enumValues.length) || (optionValues && optionValues.length)) {
+                        const enumLabels = param.enum_labels || param.option_labels || {};
+                        const normalizedOptions = [];
+                        const sourceList = optionValues && optionValues.length ? optionValues : enumValues || [];
+                        sourceList.forEach(opt => {
+                            if (opt === null || opt === undefined) {
+                                return;
+                            }
+                            if (typeof opt === 'object') {
+                                const rawValue = opt.value ?? opt.id;
+                                if (rawValue === undefined || rawValue === null || rawValue === '') {
+                                    return;
+                                }
+                                const stringValue = String(rawValue);
+                                const labelText = opt.label || opt.name || enumLabels[stringValue] || stringValue;
+                                normalizedOptions.push({ value: stringValue, label: labelText });
+                            } else {
+                                const stringValue = String(opt);
+                                const labelText = enumLabels[stringValue] || stringValue;
+                                normalizedOptions.push({ value: stringValue, label: labelText });
+                            }
+                        });
 
+                        if (normalizedOptions.length > 0) {
+                            const selectedValue = isConnected
+                                ? ''
+                                : String(currentData[paramName] ?? param.default ?? '');
+                            const selectEl = createSelect(selectedValue, normalizedOptions, null);
+                            selectEl.dataset.paramName = paramName;
+                            selectEl.disabled = isConnected;
+                            inputContainer.appendChild(selectEl);
+                            field = createField(paramLabel, inputContainer);
+                        } else {
+                            const value = isConnected ? '' : (currentData[paramName] ?? (param.default ?? ''));
+                            const placeholder = isConnected ? '值由上游节点提供' : (param.placeholder || '');
+                            const input = createTextarea(value, null);
+                            input.dataset.paramName = paramName;
+                            input.disabled = isConnected;
+                            input.placeholder = placeholder;
+                            inputContainer.appendChild(input);
+                            field = createField(paramLabel, inputContainer);
+                        }
                     } else {
                         const value = isConnected ? '' : (currentData[paramName] ?? (param.default ?? ''));
                         const placeholder = isConnected ? '值由上游节点提供' : (param.placeholder || '');
@@ -846,7 +1095,7 @@
             const finalData = { ...currentData };
 
             // 错误修复：同时查询 textarea 和 checkbox，以正确保存状态。
-            body.querySelectorAll('textarea[data-param-name], input[type="checkbox"][data-param-name]').forEach(input => {
+            body.querySelectorAll('textarea[data-param-name], input[type="checkbox"][data-param-name], select[data-param-name]').forEach(input => {
                 const key = input.dataset.paramName;
                 if (key) {
                     if (input.disabled) {
@@ -857,6 +1106,38 @@
                     }
                 }
             });
+
+            delete finalData.__condition__;
+            const selectedConditionMode = conditionModeSelect.value || 'always';
+            if (selectedConditionMode === 'expression') {
+                const expressionValue = (conditionExpressionInput.value || '').trim();
+                if (expressionValue) {
+                    finalData.__condition__ = {
+                        mode: 'expression',
+                        expression: expressionValue,
+                    };
+                }
+            } else if (selectedConditionMode === 'linked' && conditionLinkSelect) {
+                const selectedLink = linkMap.get(conditionLinkSelect.value);
+                if (selectedLink) {
+                    finalData.__condition__ = {
+                        mode: 'linked',
+                        link: {
+                            key: selectedLink.key,
+                            source_node: selectedLink.sourceNodeId,
+                            source_output: selectedLink.sourceOutputName,
+                            source_output_port: selectedLink.sourceOutputPort,
+                            target_input: selectedLink.inputName,
+                            target_input_port: selectedLink.inputPort,
+                            template: selectedLink.template,
+                        },
+                    };
+                }
+            } else if (selectedConditionMode !== 'always') {
+                finalData.__condition__ = {
+                    mode: selectedConditionMode,
+                };
+            }
 
             if (window.tgButtonEditor && window.tgButtonEditor.updateNodeConfig) {
                 window.tgButtonEditor.updateNodeConfig(node.id, finalData);
