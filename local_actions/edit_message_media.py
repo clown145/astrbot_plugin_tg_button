@@ -12,6 +12,8 @@ except ImportError:
 if TYPE_CHECKING:
     from ..main import DynamicButtonFrameworkPlugin
 
+from ..telegram_format import build_parse_mode_input, map_to_telegram_parse_mode
+
 # --- 动作元数据 ---
 ACTION_METADATA = {
     "id": "edit_message_media",
@@ -48,6 +50,10 @@ ACTION_METADATA = {
             "required": False,
             "description": "要替换的**本地语音文件路径**。",
         },
+        build_parse_mode_input(
+            description="更新媒体说明文字时使用的 Telegram 解析模式。",
+            default="html",
+        ),
     ],
     "outputs": [
         {
@@ -67,6 +73,7 @@ async def execute(
     text: str = None,
     image_source: str = None,
     voice_source: str = None,
+    parse_mode: str = "html",
 ) -> Dict[str, Any]:
     """
     执行编辑媒体消息的操作。
@@ -79,26 +86,36 @@ async def execute(
         plugin.logger.warning("edit_message_media: 未提供任何有效输入（文本、图片或语音），操作已跳过。")
         return {}
     if not InputMediaPhoto:
-         raise RuntimeError("Telegram 库未完整安装，缺少 InputMediaPhoto 等类型。")
+        raise RuntimeError("Telegram 库未完整安装，缺少 InputMediaPhoto 等类型。")
 
 
     # 2. 根据输入决定执行何种操作
     try:
+        tg_parse_mode = map_to_telegram_parse_mode(parse_mode)
+        parse_mode_kwargs = {"parse_mode": tg_parse_mode} if tg_parse_mode else {}
         # --- 情况 A: 需要替换媒体 ---
         if image_source or voice_source:
             media_payload = None
             # 优先使用图片
             if image_source:
                 with open(image_source, "rb") as photo_file:
-                    media_payload = InputMediaPhoto(media=photo_file, caption=text)
+                    media_payload = InputMediaPhoto(
+                        media=photo_file,
+                        caption=text,
+                        **parse_mode_kwargs,
+                    )
             elif voice_source:
                 with open(voice_source, "rb") as voice_file:
-                    media_payload = InputMediaAudio(media=voice_file, caption=text)
+                    media_payload = InputMediaAudio(
+                        media=voice_file,
+                        caption=text,
+                        **parse_mode_kwargs,
+                    )
 
             await client.edit_message_media(
                 chat_id=chat_id,
                 message_id=message_id,
-                media=media_payload
+                media=media_payload,
             )
 
         # --- 情况 B: 只更新说明文字 ---
@@ -106,7 +123,8 @@ async def execute(
             await client.edit_message_caption(
                 chat_id=chat_id,
                 message_id=message_id,
-                caption=text
+                caption=text,
+                **parse_mode_kwargs,
             )
 
     except Exception as e:
