@@ -68,7 +68,21 @@ ACTION_METADATA = {
             "name": "format_str",          # 参数名
             "type": "string",             # 参数类型 (主要用于 UI 显示)
             "description": "时间的格式化字符串，例如 %Y-%m-%d %H:%M:%S",
-            "default": "%Y-%m-%d %H:%M:%S" # (选填) 参数的默认值
+            "default": "%Y-%m-%d %H:%M:%S",  # (选填) 参数的默认值
+            "placeholder": "%Y-%m-%d %H:%M:%S"  # (选填) 在表单中的提示文字
+        },
+        {
+            "name": "parse_mode",
+            "type": "string",
+            "description": "选择 Telegram 文本解析模式。",
+            "default": "html",
+            "enum": ["html", "markdown", "markdownv2", "plain"],  # (选填) 枚举值 -> 渲染为下拉菜单
+            "enum_labels": {  # (选填) 下拉菜单中显示的中文标签
+                "html": "HTML（默认）",
+                "markdown": "Markdown",
+                "markdownv2": "MarkdownV2",
+                "plain": "纯文本"
+            }
         }
     ],
 
@@ -90,8 +104,16 @@ ACTION_METADATA = {
 
 **`inputs` 详解**：
 `inputs` 是一个字典列表，每个字典定义一个输入参数。当在 WebUI 的工作流编辑器中点击此动作节点时，这里定义的输入参数会以表单的形式显示出来，方便用户填写。
+
 -   `name`: 参数的内部名称，在 `execute` 函数中会用到。
--   `default`: 如果设置了默认值，在工作流中未提供此参数时，将自动使用该默认值。如果没有默认值且工作流也未提供，执行将会失败。
+-   `type`: 目前主要用于 UI 的展示（文本、数字等标签），不会限制输入类型。
+-   `required`: 设为 `True` 时，工作流保存前会提示用户补全该参数。
+-   `default`: 如果设置了默认值，在工作流中未提供此参数时，将自动使用该默认值。
+-   `placeholder`: 在表单输入框中的浅色提示文字，适合给出格式示例。
+-   `enum`: 列出允许的取值数组时，WebUI 会自动将此输入渲染为下拉菜单。
+-   `enum_labels`:（可选）为 `enum` 中的每个值提供一个更友好的显示名称。
+
+> 💡 **关于下拉菜单**：只要在参数字典中提供 `enum` 数组即可获得下拉选择器；若想让选项显示中文或解释性文字，可额外提供 `enum_labels` 映射。上述 `parse_mode` 示例就演示了如何在自定义动作中复用当前 WebUI 的“文本解析模式”下拉选择。
 
 **`outputs` 详解**：
 `outputs` 也是一个字典列表，它主要用于在 WebUI 中清晰地展示这个动作会产生哪些可供下游节点使用的数据。它就像一份“返回说明”，帮助用户构建工作流。
