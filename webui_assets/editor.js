@@ -61,6 +61,10 @@ window.addEventListener('DOMContentLoaded', () => {
     const nodePaletteSearchInput = document.getElementById('nodePaletteSearch');
     const uploadPaletteButton = document.getElementById('uploadModularActionBtn');
     const uploadPaletteInput = document.getElementById('nodePaletteUploadInput');
+    const workflowCanvasWrapper = document.querySelector('.workflow-canvas-wrapper');
+    const workflowDescriptionButton = document.getElementById('editWorkflowDescriptionBtn');
+    const workflowDescriptionPreview = document.getElementById('workflowDescriptionPreview');
+    const workflowPaletteContainer = document.querySelector('.node-palette-container');
 
     if (!nodePalette || !nodePaletteList) {
         console.error('Node palette container not found!');
@@ -537,6 +541,82 @@ window.addEventListener('DOMContentLoaded', () => {
     const deleteWorkflowBtn = document.getElementById('deleteWorkflowBtn');
     const saveWorkflowBtn = document.getElementById('saveWorkflowBtn');
 
+    const setWorkflowDescription = (value = '') => {
+        const normalized = (value === null || value === undefined) ? '' : String(value);
+        if (workflowDescriptionInput) {
+            workflowDescriptionInput.value = normalized;
+        }
+        if (!workflowDescriptionPreview) {
+            return;
+        }
+        const trimmed = normalized.trim();
+        if (!trimmed) {
+            workflowDescriptionPreview.textContent = '尚未添加描述。';
+            workflowDescriptionPreview.dataset.empty = 'true';
+        } else {
+            workflowDescriptionPreview.textContent = trimmed.replace(/\s+/g, ' ');
+            workflowDescriptionPreview.dataset.empty = 'false';
+        }
+    };
+
+    setWorkflowDescription(workflowDescriptionInput ? workflowDescriptionInput.value : '');
+
+    if (workflowDescriptionButton) {
+        workflowDescriptionButton.addEventListener('click', () => {
+            const currentValue = workflowDescriptionInput ? workflowDescriptionInput.value : '';
+            if (typeof window.showInputModal === 'function') {
+                window.showInputModal(
+                    '编辑描述',
+                    '为当前工作流填写描述：',
+                    'textarea',
+                    '（可选）简要说明此工作流的作用。',
+                    (value) => {
+                        const nextValue = typeof value === 'string' ? value : '';
+                        setWorkflowDescription(nextValue);
+                    },
+                    undefined,
+                    { defaultValue: currentValue, rows: 5 }
+                );
+            } else {
+                const fallback = window.prompt('请输入工作流描述：', currentValue);
+                if (fallback !== null) {
+                    setWorkflowDescription(fallback);
+                }
+            }
+        });
+    }
+
+    const syncPaletteHeight = () => {
+        if (!workflowPaletteContainer || !workflowCanvasWrapper) {
+            return;
+        }
+
+        const isNarrow = window.matchMedia('(max-width: 960px)').matches;
+        if (isNarrow) {
+            workflowPaletteContainer.style.height = '';
+            workflowPaletteContainer.style.minHeight = '';
+            return;
+        }
+
+        const canvasHeight = workflowCanvasWrapper.offsetHeight;
+        if (canvasHeight > 0) {
+            workflowPaletteContainer.style.height = `${canvasHeight}px`;
+            workflowPaletteContainer.style.minHeight = `${canvasHeight}px`;
+        }
+    };
+
+    syncPaletteHeight();
+    if (typeof ResizeObserver === 'function' && workflowCanvasWrapper) {
+        const resizeObserver = new ResizeObserver(() => syncPaletteHeight());
+        resizeObserver.observe(workflowCanvasWrapper);
+    }
+    window.addEventListener('resize', () => {
+        window.requestAnimationFrame(syncPaletteHeight);
+    });
+    window.addEventListener('workflowTabShown', () => {
+        window.requestAnimationFrame(syncPaletteHeight);
+    });
+
     const populateWorkflowSelector = async () => {
         try {
             const response = await fetchWithAuth('/api/workflows');
@@ -694,7 +774,7 @@ window.addEventListener('DOMContentLoaded', () => {
             editor.clear();
             editor.currentWorkflowId = workflowId;
             workflowNameInput.value = customData.name || '';
-            workflowDescriptionInput.value = customData.description || '';
+            setWorkflowDescription(customData.description || '');
 
             // ID 映射：从自定义字符串 ID（例如，“node-1”）到 Drawflow 的内部整数 ID
             const nodeIdMap = new Map();
@@ -816,7 +896,7 @@ window.addEventListener('DOMContentLoaded', () => {
                         editor.clear();
                         delete editor.currentWorkflowId;
                         workflowNameInput.value = '';
-                        workflowDescriptionInput.value = '';
+                        setWorkflowDescription('');
                     }
                     await populateWorkflowSelector();
                 } catch (error) {
@@ -875,7 +955,7 @@ window.addEventListener('DOMContentLoaded', () => {
                     delete editor.currentWorkflowId;
                     workflowSelector.value = ""; // 重置下拉菜单
                     workflowNameInput.value = "";
-                    workflowDescriptionInput.value = "";
+                    setWorkflowDescription('');
                 }
             );
         } else {
@@ -884,7 +964,7 @@ window.addEventListener('DOMContentLoaded', () => {
             delete editor.currentWorkflowId;
             workflowSelector.value = "";
             workflowNameInput.value = "";
-            workflowDescriptionInput.value = "";
+            setWorkflowDescription('');
         }
     };
 
