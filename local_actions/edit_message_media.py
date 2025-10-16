@@ -1,6 +1,6 @@
 # local_actions/edit_message_media.py
 
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING, Dict, Any, Optional
 
 # 导入 Telegram 媒体类型
 try:
@@ -48,6 +48,20 @@ ACTION_METADATA = {
             "required": False,
             "description": "要替换的**本地语音文件路径**。",
         },
+        {
+            "name": "parse_mode",
+            "type": "string",
+            "required": False,
+            "default": "html",
+            "description": "为说明文字选择解析模式。",
+            "enum": ["html", "markdown", "markdownv2", "plain"],
+            "enum_labels": {
+                "html": "HTML（默认）",
+                "markdown": "Markdown",
+                "markdownv2": "MarkdownV2",
+                "plain": "纯文本（不解析）",
+            },
+        },
     ],
     "outputs": [
         {
@@ -67,6 +81,7 @@ async def execute(
     text: str = None,
     image_source: str = None,
     voice_source: str = None,
+    parse_mode: str = "html",
 ) -> Dict[str, Any]:
     """
     执行编辑媒体消息的操作。
@@ -83,6 +98,20 @@ async def execute(
 
 
     # 2. 根据输入决定执行何种操作
+    def _map_parse_mode(value: Optional[str]) -> Optional[str]:
+        if not value:
+            return "HTML"
+        lowered = str(value).strip().lower()
+        if lowered in {"", "none", "plain", "text", "plaintext"}:
+            return None
+        if lowered in {"markdownv2", "mdv2"}:
+            return "MarkdownV2"
+        if lowered in {"markdown", "md"}:
+            return "Markdown"
+        return "HTML"
+
+    telegram_parse_mode = _map_parse_mode(parse_mode)
+
     try:
         # --- 情况 A: 需要替换媒体 ---
         if image_source or voice_source:
@@ -90,10 +119,22 @@ async def execute(
             # 优先使用图片
             if image_source:
                 with open(image_source, "rb") as photo_file:
-                    media_payload = InputMediaPhoto(media=photo_file, caption=text)
+                    media_kwargs: Dict[str, Any] = {
+                        "media": photo_file,
+                        "caption": text,
+                    }
+                    if telegram_parse_mode:
+                        media_kwargs["parse_mode"] = telegram_parse_mode
+                    media_payload = InputMediaPhoto(**media_kwargs)
             elif voice_source:
                 with open(voice_source, "rb") as voice_file:
-                    media_payload = InputMediaAudio(media=voice_file, caption=text)
+                    media_kwargs = {
+                        "media": voice_file,
+                        "caption": text,
+                    }
+                    if telegram_parse_mode:
+                        media_kwargs["parse_mode"] = telegram_parse_mode
+                    media_payload = InputMediaAudio(**media_kwargs)
 
             await client.edit_message_media(
                 chat_id=chat_id,
@@ -103,11 +144,14 @@ async def execute(
 
         # --- 情况 B: 只更新说明文字 ---
         elif text is not None:
-            await client.edit_message_caption(
-                chat_id=chat_id,
-                message_id=message_id,
-                caption=text
-            )
+            caption_kwargs: Dict[str, Any] = {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "caption": text,
+            }
+            if telegram_parse_mode:
+                caption_kwargs["parse_mode"] = telegram_parse_mode
+            await client.edit_message_caption(**caption_kwargs)
 
     except Exception as e:
         plugin.logger.error(f"编辑媒体消息时出错: {e}", exc_info=True)

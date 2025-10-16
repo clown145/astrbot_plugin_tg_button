@@ -1,6 +1,6 @@
 # local_actions/send_message.py
 
-from typing import TYPE_CHECKING, Dict, Any, List
+from typing import TYPE_CHECKING, Dict, Any, Optional
 
 if TYPE_CHECKING:
     from ..main import DynamicButtonFrameworkPlugin
@@ -36,6 +36,20 @@ ACTION_METADATA = {
             "required": True,
             "description": "要发送到的目标聊天 ID。通常从工作流的运行时变量 `runtime.chat_id` 获取。",
         },
+        {
+            "name": "parse_mode",
+            "type": "string",
+            "required": False,
+            "default": "html",
+            "description": "选择文本解析模式以匹配 Telegram 对 HTML/Markdown 的支持，或选择纯文本不解析。",
+            "enum": ["html", "markdown", "markdownv2", "plain"],
+            "enum_labels": {
+                "html": "HTML（默认）",
+                "markdown": "Markdown",
+                "markdownv2": "MarkdownV2",
+                "plain": "纯文本（不解析）",
+            },
+        },
     ],
     "outputs": [
         {
@@ -54,6 +68,7 @@ async def execute(
     text: str = None,
     image_source: str = None,
     voice_source: str = None,
+    parse_mode: str = "html",
 ) -> Dict[str, Any]:
     """
     【已重构】立即执行发送消息的操作，并返回 message_id。
@@ -65,24 +80,50 @@ async def execute(
         # 注意：ActionExecutor 会捕获这个异常并报告错误
         raise RuntimeError("无法获取 Telegram 客户端实例。")
 
+    def _map_parse_mode(value: str) -> Optional[str]:
+        if not value:
+            return "HTML"
+        lowered = str(value).strip().lower()
+        if lowered in {"", "none", "plain", "text", "plaintext"}:
+            return None
+        if lowered in {"markdownv2", "mdv2"}:
+            return "MarkdownV2"
+        if lowered in {"markdown", "md"}:
+            return "Markdown"
+        return "HTML"
+
     # 2. 准备消息内容
     caption = text or ""
     sent_message = None
+    telegram_parse_mode = _map_parse_mode(parse_mode)
 
     # 3. 根据内容调用不同的 API
     try:
         if image_source:
             with open(image_source, "rb") as photo_payload:
-                sent_message = await client.send_photo(
-                    chat_id=chat_id, photo=photo_payload, caption=caption
-                )
+                send_kwargs: Dict[str, Any] = {
+                    "chat_id": chat_id,
+                    "photo": photo_payload,
+                    "caption": caption,
+                }
+                if telegram_parse_mode:
+                    send_kwargs["parse_mode"] = telegram_parse_mode
+                sent_message = await client.send_photo(**send_kwargs)
         elif voice_source:
             with open(voice_source, "rb") as voice_payload:
-                sent_message = await client.send_voice(
-                    chat_id=chat_id, voice=voice_payload, caption=caption
-                )
+                send_kwargs = {
+                    "chat_id": chat_id,
+                    "voice": voice_payload,
+                    "caption": caption,
+                }
+                if telegram_parse_mode:
+                    send_kwargs["parse_mode"] = telegram_parse_mode
+                sent_message = await client.send_voice(**send_kwargs)
         elif caption:
-            sent_message = await client.send_message(chat_id=chat_id, text=caption)
+            send_kwargs = {"chat_id": chat_id, "text": caption}
+            if telegram_parse_mode:
+                send_kwargs["parse_mode"] = telegram_parse_mode
+            sent_message = await client.send_message(**send_kwargs)
         else:
             # 没有发送任何内容，可以选择静默返回或报错
             return {}  # 返回空字典，表示没有输出
