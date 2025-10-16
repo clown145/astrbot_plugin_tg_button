@@ -57,9 +57,20 @@ window.addEventListener('DOMContentLoaded', () => {
     }, { passive: false });
 
     const nodePalette = document.getElementById('node-palette');
-    if (!nodePalette) {
-        console.error('Node palette #node-palette not found!');
+    const nodePaletteList = document.getElementById('nodePaletteList');
+    const nodePaletteSearchInput = document.getElementById('nodePaletteSearch');
+    const uploadPaletteButton = document.getElementById('uploadModularActionBtn');
+    const uploadPaletteInput = document.getElementById('nodePaletteUploadInput');
+
+    if (!nodePalette || !nodePaletteList) {
+        console.error('Node palette container not found!');
         return;
+    }
+    if (!nodePaletteSearchInput) {
+        console.warn('Palette search input #nodePaletteSearch 不存在，将无法进行搜索过滤。');
+    }
+    if (!uploadPaletteButton || !uploadPaletteInput) {
+        console.warn('上传控件缺失，无法在前端直接上传模块化动作。');
     }
 
     // --- 认证与 API 辅助函数 ---
@@ -89,6 +100,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // --- 节点面板逻辑 ---
     let allAvailableActions = {};
+    let secureUploadEnabled = false;
+    let paletteSearchTerm = '';
 
     const escapeHTML = (str) => {
         if (!str) return '';
@@ -108,214 +121,394 @@ window.addEventListener('DOMContentLoaded', () => {
         return str.substring(0, maxLength) + '...';
     };
 
-    const populateNodePalette = (actions, isSecureUploadEnabled = false) => {
-        allAvailableActions = actions; // 存储所有可用动作，供 loadWorkflow 使用
-        if (!nodePalette) return;
-        nodePalette.innerHTML = ''; // 清空
+    const calculateCanvasPosition = (clientX, clientY) => {
+        const rect = editor.precanvas.getBoundingClientRect();
+        return {
+            x: (clientX - rect.left) / editor.zoom,
+            y: (clientY - rect.top) / editor.zoom
+        };
+    };
 
-        if (!actions || typeof actions !== 'object') {
-            nodePalette.innerHTML = '<p style="color: red;">动作列表数据无效。</p>';
+    const addActionNode = (action, posX, posY) => {
+        if (!action || !action.id) {
+            console.warn('无法在画布上创建节点: 缺少动作定义或 ID。');
             return;
         }
 
-        // 仅筛选模块化动作
-        const modularActions = Object.entries(actions).filter(([_, action]) => action.isModular);
+        const numInputs = action.isModular ? (action.inputs || []).length : 1;
+        const numOutputs = action.isModular ? (action.outputs || []).length : 1;
 
-        const createNodeElement = (actionId, action) => {
-            const nodeElement = document.createElement('div');
-            nodeElement.className = 'palette-node';
-            nodeElement.draggable = true;
+        const buildPortLabel = (name, cls) => {
+            const baseName = name || '';
+            const truncated = truncate(baseName, 7);
+            return `<div class="port-label ${cls}" title="${escapeHTML(baseName)}">${escapeHTML(truncated)}</div>`;
+        };
 
-            let nodeTitleHTML = `
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <strong>${escapeHTML(action.name || actionId)}</strong>
-                <div class="node-actions" style="display: flex; align-items: center; gap: 8px;">
-                    <a href="/api/actions/modular/download/${action.id}" download="${escapeHTML(action.filename || (action.id + '.py'))}" class="secondary node-action-btn download-action-btn" title="下载" style="text-decoration: none; font-size: 1.1em; line-height: 1;">&#x2B07;</a>
-                    <a href="#" class="secondary node-action-btn delete-action-btn" data-action-id="${action.id}" data-action-name="${action.name || actionId}" title="删除" style="text-decoration: none; font-size: 1.1em; line-height: 1; color: var(--danger-primary);">&#x1F5D1;</a>
-                </div>
-              </div>
-            `;
+        const inputsHTML = (action.inputs || []).map(input => buildPortLabel(input.name, 'port-label-in')).join('');
+        const outputsHTML = (action.outputs || []).map(output => buildPortLabel(output.name, 'port-label-out')).join('');
 
-            let nodeHTML = nodeTitleHTML;
-            if (action.isModular) {
-                const inputsHTML = (action.inputs || []).map(input => `<div class="port-label">- ${escapeHTML(input.name)} (in)</div>`).join('');
-                const outputsHTML = (action.outputs || []).map(output => `<div class="port-label">- ${escapeHTML(output.name)} (out)</div>`).join('');
-                nodeHTML += `<div class="node-ports">${inputsHTML}${outputsHTML}</div>`;
+        const nodeContentHTML = `
+            <div class="node-title" title="${escapeHTML(action.name || action.id)}">${escapeHTML(action.name || action.id)}</div>
+            ${action.isModular ? `
+            <div class="ports-wrapper">
+                <div class="input-ports">${inputsHTML}</div>
+                <div class="output-ports">${outputsHTML}</div>
+            </div>
+            ` : ''}
+        `;
+
+        const internalNodeData = {
+            action: action,
+            data: {}
+        };
+
+        editor.addNode(
+            action.id,
+            Math.max(1, numInputs),
+            Math.max(1, numOutputs),
+            posX,
+            posY,
+            'workflow-node',
+            internalNodeData,
+            nodeContentHTML
+        );
+    };
+
+    let touchDragData = null;
+    let touchDragOrigin = null;
+    let touchDragActive = false;
+
+    function startTouchDrag(touch, action) {
+        touchDragData = action;
+        touchDragOrigin = { x: touch.clientX, y: touch.clientY };
+        touchDragActive = false;
+    }
+
+    function updateTouchDrag(touch) {
+        if (!touchDragData || !touchDragOrigin) {
+            return;
+        }
+        if (!touchDragActive) {
+            const dx = touch.clientX - touchDragOrigin.x;
+            const dy = touch.clientY - touchDragOrigin.y;
+            if (Math.hypot(dx, dy) > 10) {
+                touchDragActive = true;
+                document.body.classList.add('is-touch-dragging');
             }
-            nodeHTML += `<p>${escapeHTML(action.description || '无描述')}</p>`;
-            nodeElement.innerHTML = nodeHTML;
+        }
+    }
 
-            // Drag start listener
-            nodeElement.addEventListener('dragstart', (event) => {
-                if (event.target.closest('.node-action-btn')) {
-                    event.preventDefault();
-                    return;
-                }
-                if (event.dataTransfer) {
-                    event.dataTransfer.setData('text/plain', JSON.stringify(action));
+    function finishTouchDrag(touch) {
+        if (!touchDragData) {
+            return;
+        }
+
+        document.body.classList.remove('is-touch-dragging');
+
+        if (touchDragActive && touch) {
+            const rect = container.getBoundingClientRect();
+            if (
+                touch.clientX >= rect.left &&
+                touch.clientX <= rect.right &&
+                touch.clientY >= rect.top &&
+                touch.clientY <= rect.bottom
+            ) {
+                const { x, y } = calculateCanvasPosition(touch.clientX, touch.clientY);
+                addActionNode(touchDragData, x, y);
+            }
+        }
+
+        touchDragData = null;
+        touchDragOrigin = null;
+        touchDragActive = false;
+    }
+
+    document.addEventListener('touchmove', (event) => {
+        if (!touchDragData) {
+            return;
+        }
+        const touch = event.touches && event.touches[0];
+        if (!touch) {
+            return;
+        }
+        updateTouchDrag(touch);
+        if (touchDragActive) {
+            event.preventDefault();
+        }
+    }, { passive: false });
+
+    document.addEventListener('touchend', (event) => {
+        if (!touchDragData) {
+            return;
+        }
+        const touch = event.changedTouches && event.changedTouches[0];
+        finishTouchDrag(touch);
+    }, { passive: true });
+
+    document.addEventListener('touchcancel', () => {
+        if (!touchDragData) {
+            return;
+        }
+        document.body.classList.remove('is-touch-dragging');
+        touchDragData = null;
+        touchDragOrigin = null;
+        touchDragActive = false;
+    }, { passive: true });
+
+    const getActionDisplayName = (actionId, action) => {
+        if (!action) return actionId || '';
+        return action.name || actionId || '';
+    };
+
+    const createNodeElement = (actionId, action) => {
+        const nodeElement = document.createElement('div');
+        nodeElement.className = 'palette-node';
+        nodeElement.draggable = true;
+        nodeElement.setAttribute('role', 'listitem');
+
+        const displayName = getActionDisplayName(actionId, action);
+        const safeDisplayName = escapeHTML(displayName);
+        const fullDescription = action.description || '无描述';
+        const truncatedDescription = truncate(fullDescription, 80);
+        const safeDescription = escapeHTML(truncatedDescription);
+        const safeDescriptionFull = escapeHTML(fullDescription);
+        const safeActionId = escapeHTML(actionId);
+        const downloadUrl = `/api/actions/modular/download/${encodeURIComponent(actionId)}`;
+        const downloadFilename = escapeHTML(action.filename || `${actionId}.py`);
+
+        nodeElement.innerHTML = `
+            <div class="palette-node-header">
+                <div class="palette-node-title" title="${safeDisplayName}">${safeDisplayName}</div>
+                <div class="node-actions">
+                    <a href="${downloadUrl}" download="${downloadFilename}" class="secondary node-action-btn download-action-btn" title="下载">&#x2B07;</a>
+                    <a href="#" class="secondary node-action-btn delete-action-btn" data-action-id="${safeActionId}" data-action-name="${safeDisplayName}" title="删除">&#x1F5D1;</a>
+                </div>
+            </div>
+            <p class="palette-node-description" title="${safeDescriptionFull}">${safeDescription}</p>
+            <div class="palette-node-footer">
+                <span class="muted" title="动作 ID">${safeActionId}</span>
+            </div>
+        `;
+
+        nodeElement.addEventListener('dragstart', (event) => {
+            if (event.target.closest('.node-action-btn')) {
+                event.preventDefault();
+                return;
+            }
+            if (event.dataTransfer) {
+                event.dataTransfer.setData('text/plain', JSON.stringify(action));
+            }
+        });
+
+        nodeElement.addEventListener('touchstart', (event) => {
+            if (event.target.closest('.node-action-btn')) {
+                return;
+            }
+            const touch = event.touches && event.touches[0];
+            if (!touch) return;
+            startTouchDrag(touch, action);
+        }, { passive: true });
+
+        const downloadBtn = nodeElement.querySelector('.download-action-btn');
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                try {
+                    const response = await fetchWithAuth(downloadUrl);
+                    const blob = await response.blob();
+
+                    const tempLink = document.createElement('a');
+                    tempLink.href = URL.createObjectURL(blob);
+                    tempLink.setAttribute('download', downloadBtn.getAttribute('download'));
+                    document.body.appendChild(tempLink);
+                    tempLink.click();
+                    document.body.removeChild(tempLink);
+                    URL.revokeObjectURL(tempLink.href);
+
+                } catch (error) {
+                    console.error('下载动作文件失败:', error);
+                    window.showInfoModal(`下载文件失败: ${error.message}`, true);
                 }
             });
+        }
 
-            // Download button listener
-            const downloadBtn = nodeElement.querySelector('.download-action-btn');
-            if (downloadBtn) {
-                downloadBtn.addEventListener('click', async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
+        const deleteBtn = nodeElement.querySelector('.delete-action-btn');
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
 
-                    const url = downloadBtn.href;
-                    const filename = downloadBtn.getAttribute('download');
+                const actionIdToDelete = deleteBtn.dataset.actionId;
+                const actionNameToDelete = deleteBtn.dataset.actionName;
 
-                    try {
-                        const response = await fetchWithAuth(url);
-                        const blob = await response.blob();
-
-                        const tempLink = document.createElement('a');
-                        tempLink.href = URL.createObjectURL(blob);
-                        tempLink.setAttribute('download', filename);
-                        document.body.appendChild(tempLink);
-                        tempLink.click();
-                        document.body.removeChild(tempLink);
-                        URL.revokeObjectURL(tempLink.href);
-
-                    } catch (error) {
-                        console.error('下载动作文件失败:', error);
-                        window.showInfoModal(`下载文件失败: ${error.message}`, true);
-                    }
-                });
-            }
-
-            // Delete button listener
-            const deleteBtn = nodeElement.querySelector('.delete-action-btn');
-            if (deleteBtn) {
-                deleteBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-
-                    const actionIdToDelete = deleteBtn.dataset.actionId;
-                    const actionNameToDelete = deleteBtn.dataset.actionName;
-
-                    const deleteAction = () => {
-                        const performDelete = async (password) => {
-                            try {
-                                const fetchOptions = {
-                                    method: 'DELETE',
-                                    headers: { 'Content-Type': 'application/json' },
-                                };
-                                if (isSecureUploadEnabled) {
-                                    fetchOptions.body = JSON.stringify({ upload_password: password });
-                                }
-
-                                await fetchWithAuth(`/api/actions/modular/${actionIdToDelete}`, fetchOptions);
-                                window.showInfoModal(`动作 '${actionNameToDelete}' 已删除。页面将刷新。`);
-                                setTimeout(() => window.location.reload(), 1500);
-                            } catch (error) {
-                                console.error('删除动作失败:', error);
-                                window.showInfoModal(`删除失败: ${error.message}`, true);
+                const deleteAction = () => {
+                    const performDelete = async (password) => {
+                        try {
+                            const fetchOptions = {
+                                method: 'DELETE',
+                                headers: { 'Content-Type': 'application/json' },
+                            };
+                            if (secureUploadEnabled) {
+                                fetchOptions.body = JSON.stringify({ upload_password: password });
                             }
-                        };
 
-                        if (isSecureUploadEnabled) {
-                            window.showInputModal(
-                                '需要密码',
-                                '服务器已启用安全密码，请输入密码以删除:',
-                                'password',
-                                '请输入密码...',
-                                performDelete,
-                                () => { console.log('删除操作已取消。'); }
-                            );
-                        } else {
-                            performDelete();
+                            await fetchWithAuth(`/api/actions/modular/${encodeURIComponent(actionIdToDelete)}`, fetchOptions);
+                            window.showInfoModal(`动作 '${actionNameToDelete}' 已删除。页面将刷新。`);
+                            setTimeout(() => window.location.reload(), 1500);
+                        } catch (error) {
+                            console.error('删除动作失败:', error);
+                            window.showInfoModal(`删除失败: ${error.message}`, true);
                         }
                     };
 
-                    window.showConfirmModal(
-                        '确认删除',
-                        `您确定要永久删除模块化动作 “${actionNameToDelete}” 吗？<br><br>此操作无法撤销。`,
-                        deleteAction
-                    );
-                });
-            }
-
-            return nodeElement;
-        };
-
-        const modularHeader = document.createElement('h4');
-        modularHeader.textContent = '模块化动作';
-
-        const uploadBtn = document.createElement('button');
-        uploadBtn.textContent = '上传';
-        uploadBtn.className = 'secondary';
-        uploadBtn.style.marginLeft = '10px';
-        uploadBtn.style.fontSize = '0.8em';
-        modularHeader.appendChild(uploadBtn);
-
-        const fileInput = document.createElement('input');
-        fileInput.type = 'file';
-        fileInput.accept = '.py';
-        fileInput.style.display = 'none';
-
-        uploadBtn.addEventListener('click', () => fileInput.click());
-
-        fileInput.addEventListener('change', (event) => {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const content = e.target.result;
-
-                const performUpload = async (password) => {
-                    const payload = { filename: file.name, content };
-                    if (isSecureUploadEnabled) {
-                        payload.upload_password = password;
-                    }
-
-                    try {
-                        await fetchWithAuth('/api/actions/modular/upload', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-                        window.showInfoModal(`动作 '${file.name}' 上传成功！页面将刷新以同步。`);
-                        setTimeout(() => window.location.reload(), 1500);
-                    } catch (error) {
-                        console.error('上传动作失败:', error);
-                        window.showInfoModal(`上传失败: ${error.message}`, true);
+                    if (secureUploadEnabled) {
+                        window.showInputModal(
+                            '需要密码',
+                            '服务器已启用安全密码，请输入密码以删除:',
+                            'password',
+                            '请输入密码...',
+                            performDelete,
+                            () => { console.log('删除操作已取消。'); }
+                        );
+                    } else {
+                        performDelete();
                     }
                 };
 
-                if (isSecureUploadEnabled) {
-                    window.showInputModal(
-                        '需要密码',
-                        '服务器已启用上传密码，请输入密码以上传:',
-                        'password',
-                        '请输入密码...',
-                        performUpload,
-                        () => {
-                            event.target.value = ''; // 取消时清空文件输入
-                            console.log('上传操作已取消。');
-                        }
-                    );
-                } else {
-                    performUpload();
-                }
-            };
-            reader.readAsText(file);
-            event.target.value = ''; // 立即清空，防止同一文件不触发change
-        });
-
-        nodePalette.appendChild(modularHeader);
-        nodePalette.appendChild(fileInput);
-
-        if (modularActions.length === 0) {
-            nodePalette.innerHTML += '<p class="muted">没有可用的模块化动作。</p>';
-        } else {
-            modularActions.forEach(([actionId, action]) => {
-                nodePalette.appendChild(createNodeElement(actionId, { ...action, id: actionId }));
+                window.showConfirmModal(
+                    '确认删除',
+                    `您确定要永久删除模块化动作 “${actionNameToDelete}” 吗？<br><br>此操作无法撤销。`,
+                    deleteAction
+                );
             });
         }
+
+        return nodeElement;
     };
+
+    const renderNodePalette = () => {
+        nodePaletteList.innerHTML = '';
+
+        if (!allAvailableActions || typeof allAvailableActions !== 'object') {
+            nodePaletteList.innerHTML = '<div class="node-palette-empty">动作列表数据无效。</div>';
+            return;
+        }
+
+        const modularActions = Object.entries(allAvailableActions).filter(([, action]) => action && action.isModular);
+
+        const normalizedTerm = paletteSearchTerm.trim().toLowerCase();
+        const filteredActions = modularActions
+            .filter(([actionId, action]) => {
+                if (!normalizedTerm) return true;
+                const displayName = getActionDisplayName(actionId, action).toLowerCase();
+                const description = (action.description || '').toLowerCase();
+                return displayName.includes(normalizedTerm) || description.includes(normalizedTerm);
+            })
+            .sort(([idA, actionA], [idB, actionB]) => {
+                const nameA = getActionDisplayName(idA, actionA);
+                const nameB = getActionDisplayName(idB, actionB);
+                const compare = nameA.localeCompare(nameB, 'zh-Hans-CN', { sensitivity: 'base' });
+                if (compare !== 0) {
+                    return compare;
+                }
+                return idA.localeCompare(idB, 'zh-Hans-CN', { sensitivity: 'base' });
+            });
+
+        if (filteredActions.length === 0) {
+            if (normalizedTerm) {
+                const safeTerm = escapeHTML(paletteSearchTerm);
+                nodePaletteList.innerHTML = `<div class="node-palette-empty">未找到匹配 “${safeTerm}” 的动作。</div>`;
+            } else {
+                nodePaletteList.innerHTML = '<div class="node-palette-empty">没有可用的模块化动作。</div>';
+            }
+            return;
+        }
+
+        filteredActions.forEach(([actionId, action]) => {
+            const actionWithId = { ...action, id: actionId };
+            nodePaletteList.appendChild(createNodeElement(actionId, actionWithId));
+        });
+    };
+
+    const populateNodePalette = (actions = {}, isSecure = false) => {
+        allAvailableActions = actions || {};
+        secureUploadEnabled = Boolean(isSecure);
+        renderNodePalette();
+    };
+
+    if (nodePaletteSearchInput && !nodePaletteSearchInput.dataset.bound) {
+        nodePaletteSearchInput.addEventListener('input', (event) => {
+            paletteSearchTerm = event.target.value || '';
+            renderNodePalette();
+        });
+        nodePaletteSearchInput.dataset.bound = 'true';
+    }
+
+    const bindUploadHandlers = () => {
+        if (!uploadPaletteButton || !uploadPaletteInput) {
+            return;
+        }
+
+        if (!uploadPaletteButton.dataset.bound) {
+            uploadPaletteButton.addEventListener('click', () => uploadPaletteInput.click());
+            uploadPaletteButton.dataset.bound = 'true';
+        }
+
+        if (!uploadPaletteInput.dataset.bound) {
+            uploadPaletteInput.addEventListener('change', (event) => {
+                const file = event.target.files && event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const content = e.target.result;
+
+                    const performUpload = async (password) => {
+                        const payload = { filename: file.name, content };
+                        if (secureUploadEnabled) {
+                            payload.upload_password = password;
+                        }
+
+                        try {
+                            await fetchWithAuth('/api/actions/modular/upload', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(payload)
+                            });
+                            window.showInfoModal(`动作 '${file.name}' 上传成功！页面将刷新以同步。`);
+                            setTimeout(() => window.location.reload(), 1500);
+                        } catch (error) {
+                            console.error('上传动作失败:', error);
+                            window.showInfoModal(`上传失败: ${error.message}`, true);
+                        }
+                    };
+
+                    if (secureUploadEnabled) {
+                        window.showInputModal(
+                            '需要密码',
+                            '服务器已启用上传密码，请输入密码以上传:',
+                            'password',
+                            '请输入密码...',
+                            performUpload,
+                            () => {
+                                console.log('上传操作已取消。');
+                            }
+                        );
+                    } else {
+                        performUpload();
+                    }
+                };
+
+                reader.readAsText(file);
+                event.target.value = '';
+            });
+            uploadPaletteInput.dataset.bound = 'true';
+        }
+    };
+
+    bindUploadHandlers();
 
     // --- 拖放逻辑 ---
     container.addEventListener('drop', (event) => {
@@ -325,42 +518,8 @@ window.addEventListener('DOMContentLoaded', () => {
             if (actionStr) {
                 try {
                     const action = JSON.parse(actionStr);
-
-                    const numInputs = action.isModular ? (action.inputs || []).length : 1;
-                    const numOutputs = action.isModular ? (action.outputs || []).length : 1;
-
-                    const pos_x = event.clientX * (editor.precanvas.clientWidth / (editor.precanvas.clientWidth * editor.zoom)) - (editor.precanvas.getBoundingClientRect().x * (editor.precanvas.clientWidth / (editor.precanvas.clientWidth * editor.zoom)));
-                    const pos_y = event.clientY * (editor.precanvas.clientHeight / (editor.precanvas.clientHeight * editor.zoom)) - (editor.precanvas.getBoundingClientRect().y * (editor.precanvas.clientHeight / (editor.precanvas.clientHeight * editor.zoom)));
-
-                    // 为画布上的节点构建更丰富的内部 HTML
-                    const inputsHTML = (action.inputs || []).map(input => `<div class="port-label port-label-in" title="${escapeHTML(input.name)}">${truncate(escapeHTML(input.name), 7)}</div>`).join('');
-                    const outputsHTML = (action.outputs || []).map(output => `<div class="port-label port-label-out" title="${escapeHTML(output.name)}">${truncate(escapeHTML(output.name), 7)}</div>`).join('');
-
-                    const nodeContentHTML = `
-                        <div class="node-title" title="${escapeHTML(action.name || action.id)}">${escapeHTML(action.name || action.id)}</div>
-                        ${action.isModular ? `
-                        <div class="ports-wrapper">
-                            <div class="input-ports">${inputsHTML}</div>
-                            <div class="output-ports">${outputsHTML}</div>
-                        </div>
-                        ` : ''}
-                    `;
-
-                    const internalNodeData = {
-                        action: action, // 将整个动作定义存储在节点数据中
-                        data: {} // 初始化用于配置的空数据
-                    };
-
-                    editor.addNode(
-                        action.id,       // 节点类型名称
-                        Math.max(1, numInputs),  // 确保至少有一个输入端口
-                        Math.max(1, numOutputs), // 确保至少有一个输出端口
-                        pos_x,
-                        pos_y,
-                        'workflow-node', // 用于样式的新 CSS 类
-                        internalNodeData,
-                        nodeContentHTML
-                    );
+                    const { x, y } = calculateCanvasPosition(event.clientX, event.clientY);
+                    addActionNode(action, x, y);
 
                 } catch (e) {
                     console.error("Failed to parse node data on drop", e);
