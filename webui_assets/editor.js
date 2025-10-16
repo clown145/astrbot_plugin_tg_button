@@ -119,6 +119,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const workflowEditorBody = document.querySelector('.workflow-editor-body');
     const workflowCanvasWrapper = document.querySelector('.workflow-canvas-wrapper');
     const workflowDescriptionButton = document.getElementById('editWorkflowDescriptionBtn');
+    const workflowPalettePane = document.querySelector('.node-palette-pane');
     const workflowPaletteContainer = document.querySelector('.node-palette-container');
     const paletteCollapseButton = document.getElementById('nodePaletteCollapseBtn');
     const paletteCollapseLabel = paletteCollapseButton ? paletteCollapseButton.querySelector('.node-palette-collapse-label') : null;
@@ -662,20 +663,33 @@ window.addEventListener('DOMContentLoaded', () => {
 
         workflowPaletteContainer.style.height = '';
         workflowPaletteContainer.style.minHeight = '';
+        workflowPaletteContainer.style.maxHeight = '';
+        if (workflowPalettePane) {
+            workflowPalettePane.style.maxHeight = '';
+        }
 
         const isNarrow = window.matchMedia('(max-width: 960px)').matches;
         const isCollapsed = workflowEditorBody && workflowEditorBody.classList.contains('palette-collapsed');
 
-        if (isNarrow || isCollapsed) {
-            workflowPaletteContainer.style.maxHeight = '';
+        if (isCollapsed) {
             return;
         }
 
         const canvasHeight = workflowCanvasWrapper.getBoundingClientRect().height;
         if (canvasHeight > 0) {
-            workflowPaletteContainer.style.maxHeight = `${canvasHeight}px`;
+            const verticalPadding = isNarrow ? 96 : 72;
+            const availableHeight = Math.max(0, canvasHeight - verticalPadding);
+            if (availableHeight > 0) {
+                workflowPaletteContainer.style.maxHeight = `${availableHeight}px`;
+                if (workflowPalettePane) {
+                    workflowPalettePane.style.maxHeight = `${availableHeight}px`;
+                }
+            }
         } else {
             workflowPaletteContainer.style.maxHeight = '';
+            if (workflowPalettePane) {
+                workflowPalettePane.style.maxHeight = '';
+            }
         }
     };
 

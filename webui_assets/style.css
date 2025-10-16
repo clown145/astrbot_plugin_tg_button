@@ -297,23 +297,17 @@ textarea {
 }
 
 
+
 .workflow-editor-body {
-  display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-  align-items: stretch;
-  gap: 16px;
+  position: relative;
   margin-top: 12px;
-  height: clamp(420px, 62vh, 720px);
-  min-height: 420px;
-  transition: grid-template-columns 0.35s ease;
+  height: clamp(520px, 68vh, 840px);
+  min-height: 520px;
 }
 
 .workflow-editor-body > * {
+  height: 100%;
   min-height: 0;
-}
-
-.workflow-editor-body.palette-collapsed {
-  grid-template-columns: 76px minmax(0, 1fr);
 }
 
 .workflow-canvas-wrapper {
@@ -321,7 +315,7 @@ textarea {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border-color);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--bg-secondary);
   box-sizing: border-box;
   overflow: hidden;
@@ -329,16 +323,19 @@ textarea {
   min-height: 0;
 }
 
-
 .node-palette-pane {
-  position: relative;
+  position: absolute;
+  top: 24px;
+  left: 24px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-  height: 100%;
-  max-width: 320px;
-  transition: max-width 0.35s ease, padding 0.35s ease;
+  gap: 12px;
+  width: min(320px, calc(100% - 48px));
+  max-width: min(320px, calc(100% - 48px));
+  max-height: calc(100% - 48px);
+  z-index: 5;
+  transition: width 0.35s ease, max-width 0.35s ease, transform 0.35s ease;
+  transform-origin: 32px 32px;
 }
 
 .node-palette-collapse {
@@ -389,8 +386,9 @@ textarea {
   padding: 68px 20px 20px 20px;
   border: 1px solid var(--border-color);
   border-radius: 12px;
-  background: var(--bg-secondary);
+  background: rgba(32, 36, 44, 0.94);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px);
   box-sizing: border-box;
   min-height: 0;
   flex: 1 1 auto;
@@ -402,14 +400,21 @@ textarea {
 }
 
 .workflow-editor-body.palette-collapsed .node-palette-pane {
-  max-width: 76px;
+  width: 72px;
+  max-width: 72px;
+  max-height: 96px;
+  pointer-events: none;
 }
 
 .workflow-editor-body.palette-collapsed .node-palette-container {
   opacity: 0;
-  transform: scale(0.45) translateX(-4px);
+  transform: scale(0.45) translate(-6px, -6px);
   clip-path: circle(28px at 32px 32px);
   pointer-events: none;
+}
+
+.workflow-editor-body.palette-collapsed .node-palette-collapse {
+  pointer-events: auto;
 }
 
 .workflow-editor-body.palette-collapsed .node-palette-collapse {
@@ -458,16 +463,6 @@ textarea {
 #button-bank-column {
   position: sticky;
   top: 20px;
-}
-
-
-.node-palette-pane {
-  width: 100%;
-  max-width: 320px;
-}
-
-.node-palette-container {
-  width: 100%;
 }
 
 .node-palette-header {
@@ -533,32 +528,26 @@ textarea {
 
 @media (max-width: 960px) {
   .workflow-editor-body {
-    grid-template-columns: 1fr;
-    height: auto;
-    min-height: 0;
-  }
-
-  .workflow-canvas-wrapper {
-    order: 1;
-    min-height: clamp(360px, 58vh, 640px);
+    height: clamp(480px, 70vh, 760px);
+    min-height: 480px;
   }
 
   .node-palette-pane {
-    order: 2;
-    max-width: none;
-  }
-
-  .workflow-editor-body.palette-collapsed {
-    grid-template-columns: 1fr;
-  }
-
-  .workflow-editor-body.palette-collapsed .node-palette-container {
-    opacity: 0;
-    transform: scale(0.65);
+    left: 50%;
+    top: 18px;
+    width: min(360px, calc(100% - 32px));
+    max-width: min(360px, calc(100% - 32px));
+    transform: translate3d(-50%, 0, 0);
   }
 
   .workflow-editor-body.palette-collapsed .node-palette-pane {
-    max-width: 112px;
+    width: 88px;
+    max-width: 88px;
+    transform: translate3d(-50%, 0, 0);
+  }
+
+  .workflow-editor-body.palette-collapsed .node-palette-container {
+    transform: scale(0.55) translate(-6px, -6px);
   }
 
   .workflow-section-header {
@@ -597,6 +586,18 @@ textarea {
 
   .workflow-secondary-actions {
     justify-content: flex-start;
+  }
+
+  .node-palette-pane {
+    top: 14px;
+    width: calc(100% - 24px);
+    max-width: calc(100% - 24px);
+    transform: translate3d(-50%, 0, 0);
+  }
+
+  .workflow-editor-body.palette-collapsed .node-palette-pane {
+    width: 88px;
+    max-width: 88px;
   }
 }
 

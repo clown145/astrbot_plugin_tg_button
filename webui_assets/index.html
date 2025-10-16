@@ -82,29 +82,29 @@
         </div>
         <input type="hidden" id="workflowDescriptionInput">
         <div class="workflow-editor-body">
-          <div class="node-palette-pane">
-            <div id="node-palette" class="node-palette-container">
-              <div class="node-palette-header">
-                <div>
-                  <h4>模块化动作</h4>
-                  <p class="muted">从这里拖拽动作节点到右侧画布。</p>
-                </div>
-                <div class="node-palette-tools">
-                  <input type="search" id="nodePaletteSearch" placeholder="搜索动作..." aria-label="搜索模块化动作">
-                  <button id="uploadModularActionBtn" class="secondary compact" type="button">上传</button>
-                </div>
-              </div>
-              <input type="file" id="nodePaletteUploadInput" accept=".py" hidden>
-              <div id="nodePaletteList" class="node-palette-scroll" role="list" aria-label="可用模块化动作列表">
-                <!-- 节点列表将在此处注入 -->
-              </div>
-            </div>
-            <button id="nodePaletteCollapseBtn" class="node-palette-collapse" type="button" aria-expanded="true" aria-controls="node-palette" aria-label="收起模块化动作列表">
-              <span class="visually-hidden node-palette-collapse-label">收起列表</span>
-            </button>
-          </div>
           <div class="workflow-canvas-wrapper">
             <div id="drawflow"></div>
+            <div class="node-palette-pane">
+              <div id="node-palette" class="node-palette-container">
+                <div class="node-palette-header">
+                  <div>
+                    <h4>模块化动作</h4>
+                    <p class="muted">从这里拖拽动作节点到右侧画布。</p>
+                  </div>
+                  <div class="node-palette-tools">
+                    <input type="search" id="nodePaletteSearch" placeholder="搜索动作..." aria-label="搜索模块化动作">
+                    <button id="uploadModularActionBtn" class="secondary compact" type="button">上传</button>
+                  </div>
+                </div>
+                <input type="file" id="nodePaletteUploadInput" accept=".py" hidden>
+                <div id="nodePaletteList" class="node-palette-scroll" role="list" aria-label="可用模块化动作列表">
+                  <!-- 节点列表将在此处注入 -->
+                </div>
+              </div>
+              <button id="nodePaletteCollapseBtn" class="node-palette-collapse" type="button" aria-expanded="true" aria-controls="node-palette" aria-label="收起模块化动作列表">
+                <span class="visually-hidden node-palette-collapse-label">收起列表</span>
+              </button>
+            </div>
             <div class="workflow-zoom-controls" role="group" aria-label="画布缩放">
               <button id="workflowZoomOut" class="secondary" type="button" title="缩小画布">-</button>
               <span id="workflowZoomValue" class="workflow-zoom-display">100%</span>
