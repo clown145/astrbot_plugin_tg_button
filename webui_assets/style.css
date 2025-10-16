@@ -305,6 +305,7 @@ textarea {
   margin-top: 12px;
   height: clamp(420px, 62vh, 720px);
   min-height: 420px;
+  transition: grid-template-columns 0.35s ease;
 }
 
 .workflow-editor-body > * {
@@ -312,7 +313,7 @@ textarea {
 }
 
 .workflow-editor-body.palette-collapsed {
-  grid-template-columns: 52px minmax(0, 1fr);
+  grid-template-columns: 76px minmax(0, 1fr);
 }
 
 .workflow-canvas-wrapper {
@@ -330,25 +331,62 @@ textarea {
 
 
 .node-palette-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
   min-height: 0;
   height: 100%;
-  transition: width 0.28s ease;
+  max-width: 320px;
+  transition: max-width 0.35s ease, padding 0.35s ease;
 }
 
 .node-palette-collapse {
-  align-self: flex-end;
-  white-space: nowrap;
-  transition: transform 0.28s ease, padding 0.28s ease, border-radius 0.28s ease, font-size 0.28s ease;
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 30% 30%, rgba(0, 255, 127, 0.35), rgba(0, 179, 89, 0.55)), var(--accent-secondary);
+  color: var(--bg-primary);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.35s ease, box-shadow 0.35s ease, background 0.35s ease;
+  z-index: 2;
+}
+
+.node-palette-collapse::before {
+  content: '';
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-top: none;
+  border-right: none;
+  transform: rotate(45deg) translate(-1px, 1px);
+  transition: transform 0.35s ease;
+}
+
+.node-palette-collapse:active {
+  transform: scale(0.92);
+}
+
+.node-palette-collapse:focus-visible {
+  outline: 2px solid rgba(0, 255, 127, 0.8);
+  outline-offset: 3px;
 }
 
 .node-palette-container {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px;
+  padding: 68px 20px 20px 20px;
   border: 1px solid var(--border-color);
   border-radius: 12px;
   background: var(--bg-secondary);
@@ -358,26 +396,34 @@ textarea {
   flex: 1 1 auto;
   height: 100%;
   overflow: hidden;
-  transition: opacity 0.28s ease, transform 0.28s ease;
+  clip-path: inset(0 round 12px);
+  transition: opacity 0.35s ease, transform 0.35s ease, clip-path 0.35s ease;
+  transform-origin: 32px 32px;
 }
 
-.workflow-editor-body.palette-collapsed .node-palette-collapse {
-  align-self: stretch;
-  writing-mode: vertical-rl;
-  transform: translateX(-2px);
-  border-radius: 12px;
-  padding: 12px 6px;
-  font-size: 12px;
+.workflow-editor-body.palette-collapsed .node-palette-pane {
+  max-width: 76px;
 }
 
 .workflow-editor-body.palette-collapsed .node-palette-container {
   opacity: 0;
-  transform: translateX(-24px);
+  transform: scale(0.45) translateX(-4px);
+  clip-path: circle(28px at 32px 32px);
   pointer-events: none;
 }
 
+.workflow-editor-body.palette-collapsed .node-palette-collapse {
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.4);
+  background: radial-gradient(circle at 30% 30%, rgba(0, 179, 89, 0.4), rgba(0, 255, 127, 0.6));
+}
+
+.workflow-editor-body.palette-collapsed .node-palette-collapse::before {
+  transform: rotate(-135deg) translate(1px, -1px);
+}
+
 .workflow-editor-body.palette-transition-skip .node-palette-container,
-.workflow-editor-body.palette-transition-skip .node-palette-collapse {
+.workflow-editor-body.palette-transition-skip .node-palette-collapse,
+.workflow-editor-body.palette-transition-skip .node-palette-pane {
   transition: none !important;
 }
 
@@ -506,16 +552,13 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .workflow-editor-body.palette-collapsed .node-palette-collapse {
-    writing-mode: horizontal-tb;
-    transform: none;
-    padding: 8px 12px;
+  .workflow-editor-body.palette-collapsed .node-palette-container {
+    opacity: 0;
+    transform: scale(0.65);
   }
 
-  .workflow-editor-body.palette-collapsed .node-palette-container {
-    opacity: 1;
-    transform: none;
-    pointer-events: auto;
+  .workflow-editor-body.palette-collapsed .node-palette-pane {
+    max-width: 112px;
   }
 
   .workflow-section-header {

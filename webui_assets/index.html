@@ -83,7 +83,6 @@
         <input type="hidden" id="workflowDescriptionInput">
         <div class="workflow-editor-body">
           <div class="node-palette-pane">
-            <button id="nodePaletteCollapseBtn" class="node-palette-collapse secondary" type="button" aria-expanded="true" aria-controls="node-palette">收起列表</button>
             <div id="node-palette" class="node-palette-container">
               <div class="node-palette-header">
                 <div>
@@ -100,6 +99,9 @@
                 <!-- 节点列表将在此处注入 -->
               </div>
             </div>
+            <button id="nodePaletteCollapseBtn" class="node-palette-collapse" type="button" aria-expanded="true" aria-controls="node-palette" aria-label="收起模块化动作列表">
+              <span class="visually-hidden node-palette-collapse-label">收起列表</span>
+            </button>
           </div>
           <div class="workflow-canvas-wrapper">
             <div id="drawflow"></div>

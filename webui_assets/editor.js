@@ -121,6 +121,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const workflowDescriptionButton = document.getElementById('editWorkflowDescriptionBtn');
     const workflowPaletteContainer = document.querySelector('.node-palette-container');
     const paletteCollapseButton = document.getElementById('nodePaletteCollapseBtn');
+    const paletteCollapseLabel = paletteCollapseButton ? paletteCollapseButton.querySelector('.node-palette-collapse-label') : null;
 
     if (!nodePalette || !nodePaletteList) {
         console.error('Node palette container not found!');
@@ -691,8 +692,11 @@ window.addEventListener('DOMContentLoaded', () => {
 
         workflowEditorBody.classList.toggle('palette-collapsed', Boolean(collapsed));
         paletteCollapseButton.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-        paletteCollapseButton.textContent = collapsed ? '展开列表' : '收起列表';
+        paletteCollapseButton.setAttribute('aria-label', collapsed ? '展开模块化动作列表' : '收起模块化动作列表');
         paletteCollapseButton.title = collapsed ? '展开模块化动作列表' : '收起模块化动作列表';
+        if (paletteCollapseLabel) {
+            paletteCollapseLabel.textContent = collapsed ? '展开列表' : '收起列表';
+        }
 
         if (skipAnimation) {
             requestAnimationFrame(() => {
