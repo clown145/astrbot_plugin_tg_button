@@ -64,24 +64,54 @@
 
     <div id="tab-workflow" class="tab-content">
       <section id="workflowSection">
-        <h2>工作流编辑器<span><button id="newWorkflowBtn">新建</button><select id="workflowSelector" class="secondary" style="margin-left: 8px; width: 150px;"></select><button id="saveWorkflowBtn" class="secondary" style="margin-left: 8px;">保存当前工作流</button><button id="deleteWorkflowBtn" class="danger" style="margin-left: 8px;">删除</button></span></h2>
-        <div class="workflow-meta-editor">
-          <div class="field">
-              <label for="workflowNameInput">工作流名称</label>
-              <input type="text" id="workflowNameInput" placeholder="为此工作流输入一个清晰的名称">
-          </div>
-          <div class="field">
-              <label for="workflowDescriptionInput">描述</label>
-              <textarea id="workflowDescriptionInput" rows="2" placeholder="（可选）简要说明此工作流的作用。"></textarea>
+        <div class="workflow-section-header">
+          <h2 class="workflow-title">工作流编辑器</h2>
+          <div class="workflow-header-actions">
+            <div class="workflow-primary-actions">
+              <select id="workflowSelector" class="secondary" aria-label="选择现有工作流"></select>
+              <label for="workflowNameInput" class="visually-hidden">工作流名称</label>
+              <input type="text" id="workflowNameInput" placeholder="输入工作流名称" aria-label="工作流名称">
+              <button id="editWorkflowDescriptionBtn" class="secondary workflow-description-btn" type="button" aria-haspopup="dialog" data-has-description="false">描述</button>
+            </div>
+            <div class="workflow-secondary-actions">
+              <button id="newWorkflowBtn" class="secondary" type="button">新建</button>
+              <button id="saveWorkflowBtn" type="button">保存当前工作流</button>
+              <button id="deleteWorkflowBtn" class="danger" type="button">删除</button>
+            </div>
           </div>
         </div>
-        <div style="display: flex; gap: 16px; margin-top: 16px;">
-          <div id="node-palette" style="width: 240px; border: 1px solid var(--border-color); padding: 10px; height: 600px; overflow-y: auto;">
-            <h4>可用节点</h4>
-            <p class="muted" style="font-size: 0.8em;">从这里拖拽节点到右侧画布。</p>
-            <!-- 节点列表将在此处注入 -->
+        <input type="hidden" id="workflowDescriptionInput">
+        <div class="workflow-editor-body">
+          <div class="workflow-canvas-wrapper">
+            <div id="drawflow"></div>
+            <div class="node-palette-pane">
+              <div id="node-palette" class="node-palette-container">
+                <div class="node-palette-header">
+                  <div>
+                    <h4>模块化动作</h4>
+                    <p class="muted">从这里拖拽动作节点到右侧画布。</p>
+                  </div>
+                  <div class="node-palette-tools">
+                    <input type="search" id="nodePaletteSearch" placeholder="搜索动作..." aria-label="搜索模块化动作">
+                    <button id="uploadModularActionBtn" class="secondary compact" type="button">上传</button>
+                  </div>
+                </div>
+                <input type="file" id="nodePaletteUploadInput" accept=".py" hidden>
+                <div id="nodePaletteList" class="node-palette-scroll" role="list" aria-label="可用模块化动作列表">
+                  <!-- 节点列表将在此处注入 -->
+                </div>
+              </div>
+              <button id="nodePaletteCollapseBtn" class="node-palette-collapse" type="button" aria-expanded="true" aria-controls="node-palette" aria-label="收起模块化动作列表">
+                <span class="visually-hidden node-palette-collapse-label">收起列表</span>
+              </button>
+            </div>
+            <div class="workflow-zoom-controls" role="group" aria-label="画布缩放">
+              <button id="workflowZoomOut" class="secondary" type="button" title="缩小画布">-</button>
+              <span id="workflowZoomValue" class="workflow-zoom-display">100%</span>
+              <button id="workflowZoomIn" class="secondary" type="button" title="放大画布">+</button>
+              <button id="workflowZoomReset" class="secondary" type="button" title="重置缩放">重置</button>
+            </div>
           </div>
-          <div id="drawflow" style="height: 600px; flex-grow: 1; border: 1px solid #ccc; position: relative;"></div>
         </div>
       </section>
     </div>

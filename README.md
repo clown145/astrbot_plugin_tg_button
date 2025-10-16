@@ -5,13 +5,21 @@
 
 _✨ 为 AstrBot 在 Telegram 中添加交互式按钮的插件，现已更新 WebUI 以方便管理。 ✨_
 
-[![Version](https://img.shields.io/badge/Version-1.3.0-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
+[![Version](https://img.shields.io/badge/Version-1.3.1-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
 [![AstrBot](https://img.shields.io/badge/AstrBot-v4.0%2B-orange.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![GitHub](https://img.shields.io/badge/作者-clown145-blue)](https://github.com/clown145)
 
 </div>
+
+## 主要更新 (V1.3.1) - 工作流画布与动作列表再升级
+
+*   **🪄 悬浮动作列表**: 模块化动作列表改为悬浮在画布左上角，折叠按钮缩成圆形悬浮球，吸入/展开动画更灵动，画布始终保持最大可视面积。
+*   **📱 触控体验优化**: 双指缩放加入阻尼和灵敏度调节，同时保留滚轮缩放与拖拽，移动端也能顺畅查看与摆放节点。
+*   **🎚️ 列表密度调整**: 列表内部采用更紧凑的卡片布局并支持平滑折叠，让更多模块动作可以同时显示、滚动浏览。
+
+---
 
 ## 主要更新 (V1.3.0) - 等待用户输入体验升级
 

@@ -93,19 +93,37 @@
         openModal(title, body, footer);
     }
 
-    function showInputModal(title, message, inputType = 'text', placeholder = '', onConfirm, onCancel) {
+    function showInputModal(title, message, inputType = 'text', placeholder = '', onConfirm, onCancel, options = {}) {
         const body = document.createElement('div');
         const messageEl = document.createElement('p');
         messageEl.innerHTML = message.replace(/\n/g, '<br>');
         body.appendChild(messageEl);
 
-        const input = document.createElement('input');
-        input.type = inputType;
+        const config = (options && typeof options === 'object') ? options : {};
+        const isTextarea = inputType === 'textarea';
+        const input = isTextarea ? document.createElement('textarea') : document.createElement('input');
+
+        if (!isTextarea) {
+            input.type = inputType;
+        }
+
         input.placeholder = placeholder;
-        input.className = 'modal-input'; // For styling
-        input.style.width = 'calc(100% - 20px)'; // Account for padding
-        input.style.marginTop = '12px';
-        input.autocomplete = 'off';
+        input.className = 'modal-input';
+        if (isTextarea) {
+            input.classList.add('modal-input--textarea');
+            input.rows = typeof config.rows === 'number' ? config.rows : 4;
+            input.style.resize = config.resize || 'vertical';
+        } else {
+            input.autocomplete = 'off';
+        }
+
+        if (typeof config.maxLength === 'number') {
+            input.maxLength = config.maxLength;
+        }
+        if (config.defaultValue !== undefined) {
+            input.value = config.defaultValue;
+        }
+
         body.appendChild(input);
 
         const footer = document.createElement('div');
@@ -128,17 +146,21 @@
         };
 
         input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                confirmBtn.click();
-            } else if (e.key === 'Escape') {
+            if (e.key === 'Escape') {
+                e.preventDefault();
                 cancelBtn.click();
+            } else if (!isTextarea && e.key === 'Enter') {
+                e.preventDefault();
+                confirmBtn.click();
             }
         });
 
         footer.append(cancelBtn, confirmBtn);
         openModal(title, body, footer);
 
-        setTimeout(() => input.focus(), 50);
+        if (config.autofocus !== false) {
+            setTimeout(() => input.focus(), 50);
+        }
     }
 
     // --- API 和状态管理 ---
@@ -1261,7 +1283,12 @@
                 if (newContent) {
                     newContent.style.display = 'block'; // 准备新内容
                     // 一个微小的延迟，以确保在开始淡入之前应用 'display: block'
-                    setTimeout(() => newContent.classList.add('active'), 10);
+                    setTimeout(() => {
+                        newContent.classList.add('active');
+                        if (tabId === 'tab-workflow') {
+                            window.dispatchEvent(new Event('workflowTabShown'));
+                        }
+                    }, 10);
                 }
             }, 300); // 等待 CSS 过渡完成 (0.3秒)
         }
@@ -1303,12 +1330,19 @@
                     targetLink.classList.add('active');
                     newContent.style.display = 'block';
                     newContent.classList.add('active');
+                    if (savedTabId === 'tab-workflow') {
+                        window.dispatchEvent(new Event('workflowTabShown'));
+                    }
                 }
             }
             // -- 结束恢复 --
 
             // 设置指示器的初始位置，无动画
-            updateTabIndicator(document.querySelector('.tab-link.active'), false);
+            const activeLink = document.querySelector('.tab-link.active');
+            updateTabIndicator(activeLink, false);
+            if (activeLink && activeLink.dataset.tab === 'tab-workflow') {
+                window.dispatchEvent(new Event('workflowTabShown'));
+            }
         })
         .catch(err => console.error('Failed to load initial state:', err));
 }());

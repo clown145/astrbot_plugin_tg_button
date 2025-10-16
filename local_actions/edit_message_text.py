@@ -1,6 +1,6 @@
 # local_actions/edit_message_text.py
 
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING, Dict, Any, Optional
 
 if TYPE_CHECKING:
     from ..main import DynamicButtonFrameworkPlugin
@@ -29,6 +29,20 @@ ACTION_METADATA = {
             "required": True,
             "description": "要更新到的新文本内容。",
         },
+        {
+            "name": "parse_mode",
+            "type": "string",
+            "required": False,
+            "default": "html",
+            "description": "选择更新文本时的解析模式。",
+            "enum": ["html", "markdown", "markdownv2", "plain"],
+            "enum_labels": {
+                "html": "HTML（默认）",
+                "markdown": "Markdown",
+                "markdownv2": "MarkdownV2",
+                "plain": "纯文本（不解析）",
+            },
+        },
     ],
     "outputs": [
         {
@@ -46,6 +60,7 @@ async def execute(
     chat_id: str,
     message_id: int,
     text: str,
+    parse_mode: str = "html",
 ) -> Dict[str, Any]:
     """
     立即执行更新消息文本的操作，并返回 message_id。
@@ -55,13 +70,29 @@ async def execute(
     if not client:
         raise RuntimeError("无法获取 Telegram 客户端实例。")
 
+    def _map_parse_mode(value: Optional[str]) -> Optional[str]:
+        if not value:
+            return "HTML"
+        lowered = str(value).strip().lower()
+        if lowered in {"", "none", "plain", "text", "plaintext"}:
+            return None
+        if lowered in {"markdownv2", "mdv2"}:
+            return "MarkdownV2"
+        if lowered in {"markdown", "md"}:
+            return "Markdown"
+        return "HTML"
+
     # 2. 调用 API 更新消息
     try:
-        await client.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=text,
-        )
+        request_kwargs: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+        }
+        telegram_parse_mode = _map_parse_mode(parse_mode)
+        if telegram_parse_mode:
+            request_kwargs["parse_mode"] = telegram_parse_mode
+        await client.edit_message_text(**request_kwargs)
     except Exception as e:
         plugin.logger.error(f"更新消息时出错: {e}", exc_info=True)
         raise RuntimeError(f"调用 Telegram API 更新消息失败: {e}")
