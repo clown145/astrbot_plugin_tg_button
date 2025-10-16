@@ -58,6 +58,7 @@ from .storage import (
     MenuDefinition,
     WebAppDefinition,
 )
+from .parse_mode import ensure_parse_mode_alias, resolve_parse_mode
 from .modular_actions import ModularActionRegistry
 
 
@@ -439,19 +440,8 @@ class DynamicButtonFrameworkPlugin(Star):
                 "user_input_is_cancelled": False,
             }
 
-        def _map_parse_mode(value: Optional[str]) -> Optional[str]:
-            if not value:
-                return "HTML"
-            lowered = value.strip().lower()
-            if lowered in ("", "none", "plain"):
-                return None
-            if lowered in ("markdownv2", "mdv2"):
-                return "MarkdownV2"
-            if lowered in ("markdown", "md"):
-                return "Markdown"
-            return "HTML"
-
-        parse_mode_value = (parse_mode or "html").strip().lower()
+        parse_mode_alias = ensure_parse_mode_alias(parse_mode)
+        parse_mode_value = parse_mode_alias
 
         def _normalize_button_label(raw_text: Optional[str], fallback: Optional[str] = None) -> str:
             base_text = str(raw_text or "").strip()
@@ -472,7 +462,7 @@ class DynamicButtonFrameworkPlugin(Star):
                 base_text = base_text[:61] + "..."
             return base_text
 
-        tg_parse_mode = _map_parse_mode(parse_mode)
+        tg_parse_mode = resolve_parse_mode(parse_mode_alias, default="HTML")
         prompt_text = prompt or "请输入内容："
 
         display_mode_value = str(display_mode or "button_label").strip().lower()
@@ -851,11 +841,11 @@ class DynamicButtonFrameworkPlugin(Star):
 
         if menu_title_mode and final_text:
             result["new_text"] = final_text
-            result["parse_mode"] = parse_mode or "html"
+            result["parse_mode"] = parse_mode_alias
             result["should_edit_message"] = True
         elif final_text and not button_label_mode:
             result["new_text"] = final_text
-            result["parse_mode"] = parse_mode or "html"
+            result["parse_mode"] = parse_mode_alias
 
         if button_overrides:
             result["button_overrides"] = button_overrides

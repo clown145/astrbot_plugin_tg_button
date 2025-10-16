@@ -2,6 +2,14 @@
 
 from typing import TYPE_CHECKING, Dict, Any
 
+from ._message_utils import (
+    DEFAULT_PARSE_MODE_ALIAS,
+    PARSE_MODE_OPTION_LABELS,
+    PARSE_MODE_OPTIONS,
+    coerce_parse_mode_for_api,
+    require_client,
+)
+
 if TYPE_CHECKING:
     from ..main import DynamicButtonFrameworkPlugin
 
@@ -29,6 +37,15 @@ ACTION_METADATA = {
             "required": True,
             "description": "要更新到的新文本内容。",
         },
+        {
+            "name": "parse_mode",
+            "type": "string",
+            "required": False,
+            "default": DEFAULT_PARSE_MODE_ALIAS,
+            "description": "渲染文本时使用的 Telegram 解析模式。",
+            "enum": PARSE_MODE_OPTIONS,
+            "enum_labels": PARSE_MODE_OPTION_LABELS,
+        },
     ],
     "outputs": [
         {
@@ -40,31 +57,26 @@ ACTION_METADATA = {
 }
 
 
-# --- 动作执行逻辑 ---
 async def execute(
     plugin: "DynamicButtonFrameworkPlugin",
     chat_id: str,
     message_id: int,
     text: str,
+    parse_mode: str = DEFAULT_PARSE_MODE_ALIAS,
 ) -> Dict[str, Any]:
-    """
-    立即执行更新消息文本的操作，并返回 message_id。
-    """
-    # 1. 获取 Telegram 客户端
-    client = plugin._get_telegram_client()
-    if not client:
-        raise RuntimeError("无法获取 Telegram 客户端实例。")
+    """立即执行更新消息文本的操作，并返回 message_id。"""
+    client = require_client(plugin)
+    telegram_parse_mode = coerce_parse_mode_for_api(parse_mode)
 
-    # 2. 调用 API 更新消息
     try:
         await client.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=text,
+            parse_mode=telegram_parse_mode,
         )
-    except Exception as e:
+    except Exception as e:  # pragma: no cover - depends on Telegram connectivity
         plugin.logger.error(f"更新消息时出错: {e}", exc_info=True)
         raise RuntimeError(f"调用 Telegram API 更新消息失败: {e}")
 
-    # 3. 如果成功，返回 message_id 以便后续节点使用
     return {"message_id": message_id}

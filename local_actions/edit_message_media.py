@@ -1,12 +1,17 @@
-# local_actions/edit_message_media.py
-
 from typing import TYPE_CHECKING, Dict, Any
 
-# 导入 Telegram 媒体类型
+from ._message_utils import (
+    DEFAULT_PARSE_MODE_ALIAS,
+    PARSE_MODE_OPTION_LABELS,
+    PARSE_MODE_OPTIONS,
+    coerce_parse_mode_for_api,
+    open_binary_file,
+    require_client,
+)
+
 try:
-    from telegram import InputMediaPhoto, InputMediaAudio
-except ImportError:
-    # 提供回退，以防库未安装
+    from telegram import InputMediaAudio, InputMediaPhoto
+except ImportError:  # pragma: no cover - optional dependency guard
     InputMediaPhoto, InputMediaAudio = None, None
 
 if TYPE_CHECKING:
@@ -48,6 +53,15 @@ ACTION_METADATA = {
             "required": False,
             "description": "要替换的**本地语音文件路径**。",
         },
+        {
+            "name": "parse_mode",
+            "type": "string",
+            "required": False,
+            "default": DEFAULT_PARSE_MODE_ALIAS,
+            "description": "更新说明文字时使用的 Telegram 解析模式。",
+            "enum": PARSE_MODE_OPTIONS,
+            "enum_labels": PARSE_MODE_OPTION_LABELS,
+        },
     ],
     "outputs": [
         {
@@ -59,7 +73,6 @@ ACTION_METADATA = {
 }
 
 
-# --- 动作执行逻辑 ---
 async def execute(
     plugin: "DynamicButtonFrameworkPlugin",
     chat_id: str,
@@ -67,51 +80,57 @@ async def execute(
     text: str = None,
     image_source: str = None,
     voice_source: str = None,
+    parse_mode: str = DEFAULT_PARSE_MODE_ALIAS,
 ) -> Dict[str, Any]:
-    """
-    执行编辑媒体消息的操作。
-    """
-    # 1. 获取 Telegram 客户端和必要检查
-    client = plugin._get_telegram_client()
-    if not client:
-        raise RuntimeError("无法获取 Telegram 客户端实例。")
+    """执行编辑媒体消息的操作。"""
+    client = require_client(plugin)
+    telegram_parse_mode = coerce_parse_mode_for_api(parse_mode)
+
     if not any([text, image_source, voice_source]):
-        plugin.logger.warning("edit_message_media: 未提供任何有效输入（文本、图片或语音），操作已跳过。")
+        plugin.logger.warning(
+            "edit_message_media: 未提供任何有效输入（文本、图片或语音），操作已跳过。"
+        )
         return {}
+
     if not InputMediaPhoto:
-         raise RuntimeError("Telegram 库未完整安装，缺少 InputMediaPhoto 等类型。")
+        raise RuntimeError("Telegram 库未完整安装，缺少 InputMedia* 类型。")
 
-
-    # 2. 根据输入决定执行何种操作
     try:
-        # --- 情况 A: 需要替换媒体 ---
-        if image_source or voice_source:
-            media_payload = None
-            # 优先使用图片
-            if image_source:
-                with open(image_source, "rb") as photo_file:
-                    media_payload = InputMediaPhoto(media=photo_file, caption=text)
-            elif voice_source:
-                with open(voice_source, "rb") as voice_file:
-                    media_payload = InputMediaAudio(media=voice_file, caption=text)
-
-            await client.edit_message_media(
-                chat_id=chat_id,
-                message_id=message_id,
-                media=media_payload
-            )
-
-        # --- 情况 B: 只更新说明文字 ---
+        if image_source:
+            with open_binary_file(image_source, "图片") as photo_file:
+                media_payload = InputMediaPhoto(
+                    media=photo_file,
+                    caption=text or None,
+                    parse_mode=telegram_parse_mode,
+                )
+                await client.edit_message_media(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    media=media_payload,
+                )
+        elif voice_source:
+            if not InputMediaAudio:
+                raise RuntimeError("Telegram 库缺少 InputMediaAudio 类型，无法更新语音。")
+            with open_binary_file(voice_source, "语音") as voice_file:
+                media_payload = InputMediaAudio(
+                    media=voice_file,
+                    caption=text or None,
+                    parse_mode=telegram_parse_mode,
+                )
+                await client.edit_message_media(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    media=media_payload,
+                )
         elif text is not None:
             await client.edit_message_caption(
                 chat_id=chat_id,
                 message_id=message_id,
-                caption=text
+                caption=text,
+                parse_mode=telegram_parse_mode,
             )
-
-    except Exception as e:
+    except Exception as e:  # pragma: no cover - depends on Telegram connectivity
         plugin.logger.error(f"编辑媒体消息时出错: {e}", exc_info=True)
         raise RuntimeError(f"调用 Telegram API 编辑媒体消息失败: {e}")
 
-    # 3. 如果成功，返回 message_id
     return {"message_id": message_id}
