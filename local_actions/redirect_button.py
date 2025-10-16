@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 ACTION_METADATA = {
     "id": "redirect_trigger_button",
-    "name": "按钮重定向 (Redirect Trigger Button)",
+    "name": "按钮重定向",
     "description": (
         "临时把当前按钮替换为另一个既有按钮的行为，可用于把一次点击引导到"
         "另一套菜单或工作流。"
