@@ -251,7 +251,7 @@ textarea {
 .workflow-header-actions {
   display: flex;
   flex: 1 1 auto;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
   align-items: center;
@@ -299,15 +299,20 @@ textarea {
 
 .workflow-editor-body {
   display: grid;
-  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   align-items: stretch;
   gap: 16px;
   margin-top: 12px;
-  min-height: clamp(420px, 60vh, 680px);
+  height: clamp(420px, 62vh, 720px);
+  min-height: 420px;
 }
 
 .workflow-editor-body > * {
   min-height: 0;
+}
+
+.workflow-editor-body.palette-collapsed {
+  grid-template-columns: 52px minmax(0, 1fr);
 }
 
 .workflow-canvas-wrapper {
@@ -319,9 +324,25 @@ textarea {
   background: var(--bg-secondary);
   box-sizing: border-box;
   overflow: hidden;
-  min-height: clamp(420px, 60vh, 680px);
+  height: 100%;
+  min-height: 0;
 }
 
+
+.node-palette-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  height: 100%;
+  transition: width 0.28s ease;
+}
+
+.node-palette-collapse {
+  align-self: flex-end;
+  white-space: nowrap;
+  transition: transform 0.28s ease, padding 0.28s ease, border-radius 0.28s ease, font-size 0.28s ease;
+}
 
 .node-palette-container {
   display: flex;
@@ -334,7 +355,30 @@ textarea {
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
   box-sizing: border-box;
   min-height: 0;
+  flex: 1 1 auto;
+  height: 100%;
   overflow: hidden;
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+
+.workflow-editor-body.palette-collapsed .node-palette-collapse {
+  align-self: stretch;
+  writing-mode: vertical-rl;
+  transform: translateX(-2px);
+  border-radius: 12px;
+  padding: 12px 6px;
+  font-size: 12px;
+}
+
+.workflow-editor-body.palette-collapsed .node-palette-container {
+  opacity: 0;
+  transform: translateX(-24px);
+  pointer-events: none;
+}
+
+.workflow-editor-body.palette-transition-skip .node-palette-container,
+.workflow-editor-body.palette-transition-skip .node-palette-collapse {
+  transition: none !important;
 }
 
 .workflow-zoom-controls {
@@ -371,9 +415,13 @@ textarea {
 }
 
 
+.node-palette-pane {
+  width: 100%;
+  max-width: 320px;
+}
+
 .node-palette-container {
   width: 100%;
-  max-width: 300px;
 }
 
 .node-palette-header {
@@ -440,7 +488,8 @@ textarea {
 @media (max-width: 960px) {
   .workflow-editor-body {
     grid-template-columns: 1fr;
-    min-height: auto;
+    height: auto;
+    min-height: 0;
   }
 
   .workflow-canvas-wrapper {
@@ -448,10 +497,25 @@ textarea {
     min-height: clamp(360px, 58vh, 640px);
   }
 
-  .node-palette-container {
+  .node-palette-pane {
     order: 2;
     max-width: none;
-    min-height: 0;
+  }
+
+  .workflow-editor-body.palette-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-editor-body.palette-collapsed .node-palette-collapse {
+    writing-mode: horizontal-tb;
+    transform: none;
+    padding: 8px 12px;
+  }
+
+  .workflow-editor-body.palette-collapsed .node-palette-container {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
   }
 
   .workflow-section-header {

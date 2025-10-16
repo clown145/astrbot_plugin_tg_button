@@ -56,14 +56,71 @@ window.addEventListener('DOMContentLoaded', () => {
         setZoom(editor.zoom + direction * getZoomStep());
     }, { passive: false });
 
+    const pinchState = {
+        active: false,
+        startDistance: 0,
+        startZoom: editor.zoom
+    };
+
+    const resetPinchState = () => {
+        pinchState.active = false;
+        pinchState.startDistance = 0;
+        pinchState.startZoom = editor.zoom;
+    };
+
+    const getTouchDistance = (touches) => {
+        if (!touches || touches.length < 2) {
+            return 0;
+        }
+        const [a, b] = touches;
+        return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    };
+
+    const PINCH_DAMPING = 0.6;
+
+    container.addEventListener('touchstart', (event) => {
+        if (event.touches && event.touches.length === 2) {
+            pinchState.active = true;
+            pinchState.startDistance = getTouchDistance(event.touches);
+            pinchState.startZoom = editor.zoom;
+        }
+    }, { passive: true });
+
+    container.addEventListener('touchmove', (event) => {
+        if (!pinchState.active || !event.touches || event.touches.length !== 2) {
+            return;
+        }
+
+        const currentDistance = getTouchDistance(event.touches);
+        if (pinchState.startDistance <= 0 || currentDistance <= 0) {
+            return;
+        }
+
+        const distanceRatio = currentDistance / pinchState.startDistance;
+        const dampedRatio = Math.pow(distanceRatio, PINCH_DAMPING);
+        const targetZoom = pinchState.startZoom * dampedRatio;
+        setZoom(targetZoom);
+        event.preventDefault();
+    }, { passive: false });
+
+    container.addEventListener('touchend', (event) => {
+        if (!event.touches || event.touches.length < 2) {
+            resetPinchState();
+        }
+    });
+
+    container.addEventListener('touchcancel', resetPinchState);
+
     const nodePalette = document.getElementById('node-palette');
     const nodePaletteList = document.getElementById('nodePaletteList');
     const nodePaletteSearchInput = document.getElementById('nodePaletteSearch');
     const uploadPaletteButton = document.getElementById('uploadModularActionBtn');
     const uploadPaletteInput = document.getElementById('nodePaletteUploadInput');
+    const workflowEditorBody = document.querySelector('.workflow-editor-body');
     const workflowCanvasWrapper = document.querySelector('.workflow-canvas-wrapper');
     const workflowDescriptionButton = document.getElementById('editWorkflowDescriptionBtn');
     const workflowPaletteContainer = document.querySelector('.node-palette-container');
+    const paletteCollapseButton = document.getElementById('nodePaletteCollapseBtn');
 
     if (!nodePalette || !nodePaletteList) {
         console.error('Node palette container not found!');
@@ -230,6 +287,15 @@ window.addEventListener('DOMContentLoaded', () => {
         if (!touchDragData) {
             return;
         }
+
+        if (event.touches && event.touches.length !== 1) {
+            return;
+        }
+
+        if (pinchState.active) {
+            return;
+        }
+
         const touch = event.touches && event.touches[0];
         if (!touch) {
             return;
@@ -242,6 +308,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
     document.addEventListener('touchend', (event) => {
         if (!touchDragData) {
+            return;
+        }
+        if (pinchState.active && event.touches && event.touches.length > 0) {
             return;
         }
         const touch = event.changedTouches && event.changedTouches[0];
@@ -307,8 +376,13 @@ window.addEventListener('DOMContentLoaded', () => {
             if (event.target.closest('.node-action-btn')) {
                 return;
             }
-            const touch = event.touches && event.touches[0];
-            if (!touch) return;
+            if (!event.touches || event.touches.length !== 1) {
+                return;
+            }
+            if (pinchState.active) {
+                return;
+            }
+            const touch = event.touches[0];
             startTouchDrag(touch, action);
         }, { passive: true });
 
@@ -585,25 +659,69 @@ window.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        workflowPaletteContainer.style.height = '';
+        workflowPaletteContainer.style.minHeight = '';
+
         const isNarrow = window.matchMedia('(max-width: 960px)').matches;
-        if (isNarrow) {
-            workflowPaletteContainer.style.height = '';
-            workflowPaletteContainer.style.minHeight = '';
+        const isCollapsed = workflowEditorBody && workflowEditorBody.classList.contains('palette-collapsed');
+
+        if (isNarrow || isCollapsed) {
             workflowPaletteContainer.style.maxHeight = '';
             return;
         }
 
-        const canvasHeight = workflowCanvasWrapper.offsetHeight;
+        const canvasHeight = workflowCanvasWrapper.getBoundingClientRect().height;
         if (canvasHeight > 0) {
-            workflowPaletteContainer.style.height = `${canvasHeight}px`;
-            workflowPaletteContainer.style.minHeight = `${canvasHeight}px`;
             workflowPaletteContainer.style.maxHeight = `${canvasHeight}px`;
         } else {
-            workflowPaletteContainer.style.height = '';
-            workflowPaletteContainer.style.minHeight = '';
             workflowPaletteContainer.style.maxHeight = '';
         }
     };
+
+    const paletteCollapseStorageKey = 'workflow-palette-collapsed';
+
+    const applyPaletteCollapse = (collapsed, skipAnimation = false) => {
+        if (!workflowEditorBody || !paletteCollapseButton) {
+            return;
+        }
+
+        if (skipAnimation) {
+            workflowEditorBody.classList.add('palette-transition-skip');
+        }
+
+        workflowEditorBody.classList.toggle('palette-collapsed', Boolean(collapsed));
+        paletteCollapseButton.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        paletteCollapseButton.textContent = collapsed ? '展开列表' : '收起列表';
+        paletteCollapseButton.title = collapsed ? '展开模块化动作列表' : '收起模块化动作列表';
+
+        if (skipAnimation) {
+            requestAnimationFrame(() => {
+                workflowEditorBody.classList.remove('palette-transition-skip');
+            });
+        }
+
+        requestAnimationFrame(syncPaletteHeight);
+    };
+
+    if (paletteCollapseButton && workflowEditorBody) {
+        let defaultCollapsed = false;
+        try {
+            defaultCollapsed = localStorage.getItem(paletteCollapseStorageKey) === '1';
+        } catch (error) {
+            console.warn('无法读取模块列表折叠状态，将使用默认展开。', error);
+        }
+        applyPaletteCollapse(defaultCollapsed, true);
+
+        paletteCollapseButton.addEventListener('click', () => {
+            const nextState = !(workflowEditorBody.classList.contains('palette-collapsed'));
+            applyPaletteCollapse(nextState);
+            try {
+                localStorage.setItem(paletteCollapseStorageKey, nextState ? '1' : '0');
+            } catch (error) {
+                console.warn('无法保存模块列表折叠状态。', error);
+            }
+        });
+    }
 
     syncPaletteHeight();
     if (typeof ResizeObserver === 'function' && workflowCanvasWrapper) {
