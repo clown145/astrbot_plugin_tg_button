@@ -5,13 +5,20 @@
 
 _✨ 为 AstrBot 在 Telegram 中添加交互式按钮的插件，现已更新 WebUI 以方便管理。 ✨_
 
-[![Version](https://img.shields.io/badge/Version-1.3.1-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
+[![Version](https://img.shields.io/badge/Version-1.3.2-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
 [![AstrBot](https://img.shields.io/badge/AstrBot-v4.0%2B-orange.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![GitHub](https://img.shields.io/badge/作者-clown145-blue)](https://github.com/clown145)
 
 </div>
+
+## 主要更新 (V1.3.2) - 新增按钮工具动作
+
+*   **🔁 按钮重定向模块化动作**: 新增的“按钮重定向”动作允许在工作流中临时复用现有按钮的行为，快速构建返回主菜单、引导至其他菜单等场景。
+*   **🆔 获取现有 ID 模块化动作**: 新增的“获取现有 ID”动作提供菜单、按钮、WebApp、本地动作与工作流的下拉选择，并将所选 ID 输出给下游节点，方便搭建依赖现有资源的流程。
+
+---
 
 ## 主要更新 (V1.3.1) - 工作流画布与动作列表再升级
 

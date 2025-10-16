@@ -264,6 +264,26 @@
 
 ---
 
+### `等待用户输入`
+*   **ID**: `await_user_input`
+*   **功能**: 暂停工作流并提示用户在当前对话中输入内容，收到回复后继续执行。
+*   **输入**:
+    *   `prompt_template` (string): 发送给用户的提示文本，支持工作流上下文变量。
+    *   `prompt_display_mode` (string): 提示展示方式，可在“修改按钮标题 / 更新菜单标题 / 替换消息文本”之间切换。
+    *   `timeout_seconds` (integer): 等待用户输入的最长时间。
+    *   `allow_empty` (boolean): 是否接受空字符串输入。
+    *   `retry_prompt_template`、`success_template`、`timeout_template`、`cancel_template` (string): 自定义再次提示、成功、超时和取消时显示的消息。
+    *   `cancel_keywords` (string): 视为取消操作的关键字列表，支持换行或逗号分隔。
+    *   `parse_mode` (string): Telegram 解析模式，支持 HTML/Markdown/纯文本。
+*   **输出**:
+    *   `user_input` (string): 用户的最新输入文本。
+    *   `user_input_status` (string): 执行状态，可能为 success/timeout/cancelled/error。
+    *   `user_input_is_timeout`、`user_input_is_cancelled` (boolean): 是否因为超时或取消而结束等待。
+    *   `user_input_message_id` (string)、`user_input_timestamp` (integer): 用户回复消息的 ID 与时间戳（若可用）。
+*   **用例**: 构建需要人工确认或补充信息的流程，例如填写订单号、输入验证码等。可搭配 `延迟/路由` 控制整体执行节奏。
+
+---
+
 ### `延迟/路由`
 *   **ID**: `delay`
 *   **功能**: 这是一个多用途的控制流工具。
@@ -278,6 +298,33 @@
 *   **用例**:
     *   在连续调用 API 之间插入短暂延迟，避免触发频率限制。
     *   强制两个或多个 `发送新消息` 动作按顺序执行，而不是并行执行。
+
+---
+
+### `按钮重定向`
+*   **ID**: `redirect_trigger_button`
+*   **功能**: 让当前触发按钮临时继承另一个既有按钮的行为，实现一键返回或导航至其他菜单。
+*   **输入**:
+    *   `target_button_id` (button): 选择要复用的目标按钮。
+    *   `reuse_target_text` (boolean): 是否同步目标按钮的标题文本。
+    *   `custom_text` (string): 可选，自定义新的按钮标题，会覆盖同步逻辑。
+*   **输出**: 无。
+*   **用例**: 快速实现“返回主菜单”“跳转到指定功能菜单”等交互，而无需复制粘贴按钮配置。
+
+---
+
+### `获取现有 ID`
+*   **ID**: `provide_existing_ids`
+*   **功能**: 通过下拉菜单列出现有的菜单、按钮、WebApp、本地动作与工作流，并输出它们的 ID 供后续节点使用。
+*   **输入**:
+    *   `menu_id` (string): 选择一个菜单。
+    *   `button_id` (string): 选择一个按钮，选项显示为“菜单名称-按钮标题”。
+    *   `web_app_id` (string): 选择一个 WebApp。
+    *   `local_action_id` (string): 选择一个旧版/本地动作。
+    *   `workflow_id` (string): 选择一个工作流。
+*   **输出**:
+    *   `menu_id`、`button_id`、`web_app_id`、`local_action_id`、`workflow_id` (string): 分别输出所选实体的 ID，未选择时输出为空字符串。
+*   **用例**: 在需要引用已有资源的工作流中快速获取 ID，例如构建按钮重定向、调用旧版动作或跳转到指定工作流。
 
 ---
 

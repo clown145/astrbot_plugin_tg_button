@@ -1,6 +1,7 @@
 import asyncio
+import copy
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 try:
@@ -284,17 +285,102 @@ class WebUIServer:
         self, _request: "web.Request"
     ) -> "web.Response":
         actions = self._modular_registry.get_all()
-        formatted_actions = [
-            {
-                "id": action.id,
-                "name": action.name,
-                "description": action.description,
-                "inputs": action.inputs,
-                "outputs": action.outputs,
-                "filename": action.source_file.name,
-            }
-            for action in actions
-        ]
+        snapshot = await self._store.get_snapshot()
+
+        def _build_menu_options() -> List[Dict[str, str]]:
+            options: List[Dict[str, str]] = []
+            for menu_id, menu in sorted(snapshot.menus.items()):
+                menu_name = menu.name or menu_id
+                label = f"{menu_name} ({menu_id})" if menu_name != menu_id else menu_id
+                options.append({"value": menu_id, "label": label})
+            return options
+
+        def _build_button_options() -> List[Dict[str, str]]:
+            menu_labels: Dict[str, List[str]] = {}
+            for menu in snapshot.menus.values():
+                menu_name = menu.name or menu.id
+                for btn_id in menu.items:
+                    button = snapshot.buttons.get(btn_id)
+                    if not button:
+                        continue
+                    button_title = button.text or button.id
+                    menu_labels.setdefault(btn_id, []).append(
+                        f"{menu_name}-{button_title}"
+                    )
+
+            options: List[Dict[str, str]] = []
+            for btn_id, button in sorted(snapshot.buttons.items()):
+                labels = menu_labels.get(btn_id)
+                if labels:
+                    label = " / ".join(sorted(dict.fromkeys(labels)))
+                else:
+                    button_title = button.text or btn_id
+                    label = f"未分配-{button_title}"
+                options.append({"value": btn_id, "label": label})
+            return options
+
+        def _build_web_app_options() -> List[Dict[str, str]]:
+            options: List[Dict[str, str]] = []
+            for webapp_id, web_app in sorted(snapshot.web_apps.items()):
+                app_name = web_app.name or webapp_id
+                label = (
+                    f"{app_name} ({webapp_id})" if app_name != webapp_id else webapp_id
+                )
+                options.append({"value": webapp_id, "label": label})
+            return options
+
+        def _build_action_options() -> List[Dict[str, str]]:
+            options: List[Dict[str, str]] = []
+            for action_id, action in sorted(snapshot.actions.items()):
+                action_name = action.name or action_id
+                label = (
+                    f"{action_name} ({action.kind})"
+                    if action.kind and action_name != action_id
+                    else action_name
+                )
+                options.append({"value": action_id, "label": label})
+            return options
+
+        def _build_workflow_options() -> List[Dict[str, str]]:
+            options: List[Dict[str, str]] = []
+            for workflow_id, workflow in sorted(snapshot.workflows.items()):
+                workflow_name = workflow.name or workflow_id
+                label = (
+                    f"{workflow_name} ({workflow_id})"
+                    if workflow_name != workflow_id
+                    else workflow_id
+                )
+                options.append({"value": workflow_id, "label": label})
+            return options
+
+        dynamic_options = {
+            "menus": _build_menu_options(),
+            "buttons": _build_button_options(),
+            "web_apps": _build_web_app_options(),
+            "local_actions": _build_action_options(),
+            "workflows": _build_workflow_options(),
+        }
+
+        formatted_actions = []
+        for action in actions:
+            inputs = []
+            for input_def in action.inputs:
+                transformed = copy.deepcopy(input_def)
+                source_key = transformed.get("options_source")
+                if source_key:
+                    transformed["options"] = dynamic_options.get(source_key, [])
+                inputs.append(transformed)
+
+            formatted_actions.append(
+                {
+                    "id": action.id,
+                    "name": action.name,
+                    "description": action.description,
+                    "inputs": inputs,
+                    "outputs": copy.deepcopy(action.outputs),
+                    "filename": action.source_file.name,
+                }
+            )
         secure_upload_enabled = bool(
             self._plugin.settings.get("secure_script_upload_password")
         )
