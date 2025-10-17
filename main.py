@@ -140,7 +140,7 @@ def _get_file_hash(path: Path) -> str:
     PLUGIN_NAME,
     "clown145",
     "一个可以通过 Telegram 按钮与自定义 WebUI 管理的插件",
-    "1.3.2",
+    "1.3.3",
     "https://github.com/clown145/astrbot_plugin_tg_button",
 )
 class DynamicButtonFrameworkPlugin(Star):
@@ -1172,5 +1172,6 @@ class DynamicButtonFrameworkPlugin(Star):
             except ValueError:
                 return chat, None
         return chat_id_str, None
+
 
 
