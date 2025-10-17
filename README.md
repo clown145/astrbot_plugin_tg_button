@@ -5,13 +5,19 @@
 
 _✨ 为 AstrBot 在 Telegram 中添加交互式按钮的插件，现已更新 WebUI 以方便管理。 ✨_
 
-[![Version](https://img.shields.io/badge/Version-1.3.2-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
+[![Version](https://img.shields.io/badge/Version-1.3.3-blue.svg)](https://github.com/clown145/astrbot_plugin_tg_button)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
 [![AstrBot](https://img.shields.io/badge/AstrBot-v4.0%2B-orange.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![GitHub](https://img.shields.io/badge/作者-clown145-blue)](https://github.com/clown145)
 
 </div>
+
+## 主要更新 (V1.3.3) - 修复按钮重定向
+
+*   **🔧 功能修复**: 解决了在特定场景下按钮重定向后菜单显示不正确的问题，确保开启“定位目标菜单”后能够准确展示目标按钮及菜单。
+
+---
 
 ## 主要更新 (V1.3.2) - 新增按钮工具动作
 
