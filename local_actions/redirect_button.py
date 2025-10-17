@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from ..main import DynamicButtonFrameworkPlugin
+    from ..actions import RuntimeContext
 
 
 ACTION_METADATA = {
@@ -32,6 +33,12 @@ ACTION_METADATA = {
             "description": "可选：填写后会覆盖上面的文案同步逻辑。",
             "placeholder": "例如：返回主菜单",
         },
+        {
+            "name": "locate_target_menu",
+            "type": "boolean",
+            "default": False,
+            "description": "若启用，回调时会将上下文定位到目标按钮所在菜单。",
+        },
     ],
     "outputs": [],
 }
@@ -50,6 +57,8 @@ async def execute(
     target_button_id: str,
     reuse_target_text: bool = True,
     custom_text: Optional[str] = None,
+    locate_target_menu: bool = False,
+    runtime: Optional["RuntimeContext"] = None,
 ) -> Dict[str, Any]:
     target_id = (target_button_id or "").strip()
     if not target_id:
@@ -59,6 +68,20 @@ async def execute(
     target_button = snapshot.buttons.get(target_id)
     if not target_button:
         raise ValueError(f"未找到 ID 为 '{target_id}' 的按钮，可能已被删除。")
+
+    origin_button_id = ""
+    origin_menu_id = ""
+    if runtime and runtime.variables:
+        origin_button_id = str(
+            runtime.variables.get("button_id")
+            or runtime.variables.get("redirect_original_button_id")
+            or ""
+        )
+        origin_menu_id = str(
+            runtime.variables.get("menu_id")
+            or runtime.variables.get("redirect_original_menu_id")
+            or ""
+        )
 
     payload = target_button.payload or {}
     override: Dict[str, Any] = {"target": "self", "temporary": True}
@@ -132,5 +155,15 @@ async def execute(
             override["raw_callback_data"] = _build_raw_callback(
                 plugin.CALLBACK_PREFIX_COMMAND, target_button.id
             )
+
+    if override.get("raw_callback_data"):
+        wrapped_button_id = origin_button_id or target_button.id
+        wrapped_menu_id = origin_menu_id or ""
+        flag = "1" if locate_target_menu else "0"
+        override["raw_callback_data"] = (
+            f"{plugin.CALLBACK_PREFIX_REDIRECT}"
+            f"{wrapped_button_id}:{wrapped_menu_id}:{flag}:"
+            f"{override['raw_callback_data']}"
+        )
 
     return {"button_overrides": [override]}
