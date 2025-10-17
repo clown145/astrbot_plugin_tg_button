@@ -205,16 +205,23 @@ class ActionExecutor:
                     "notification",
                     "new_message_chain",
                     "temp_files_to_clean",
+                    "button_title",
                 ]
             }
 
             return ActionExecutionResult(
                 success=True,
-                should_edit_message=bool(result_dict.get("new_text")),
+                should_edit_message=bool(
+                    result_dict.get("new_text")
+                    or result_dict.get("next_menu_id")
+                    or result_dict.get("button_overrides")
+                    or result_dict.get("button_title")
+                ),
                 new_text=result_dict.get("new_text"),
                 parse_mode=self._map_parse_mode(result_dict.get("parse_mode", "html")),
                 next_menu_id=result_dict.get("next_menu_id"),
                 button_overrides=result_dict.get("button_overrides", []),
+                button_title=result_dict.get("button_title"),
                 notification=result_dict.get("notification"),
                 new_message_chain=result_dict.get("new_message_chain"),
                 temp_files_to_clean=result_dict.get("temp_files_to_clean", []),
@@ -300,6 +307,9 @@ class ActionExecutor:
             final_result.button_overrides.extend(
                 result.button_overrides
             )  # 按钮覆盖，全部累加
+
+        if result.button_title:
+            final_result.button_title = result.button_title
 
     async def _execute_workflow_node(
         self,
@@ -621,6 +631,7 @@ class ActionExecutor:
                 final_result.new_text
                 or final_result.next_menu_id
                 or final_result.button_overrides
+                or final_result.button_title
             )
             and not final_result.new_message_chain
         )
