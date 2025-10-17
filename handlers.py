@@ -221,7 +221,12 @@ async def _prepare_execution_context(
 
     menu_for_runtime = target_menu if locate_target_menu else (source_menu or target_menu)
     button_for_runtime = button if locate_target_menu else (source_button or button)
-    menu_for_view = source_menu or menu_for_runtime or target_menu
+    menu_for_view = (
+        target_menu if locate_target_menu else (source_menu or menu_for_runtime or target_menu)
+    )
+
+    display_button = button if locate_target_menu else (source_button or button)
+    display_menu = target_menu if locate_target_menu else (menu_for_view or target_menu)
 
     source_menu_id = (
         redirect_meta.source_menu_id if redirect_meta and redirect_meta.source_menu_id else None
@@ -230,6 +235,8 @@ async def _prepare_execution_context(
         source_menu_id = menu_for_view.id
 
     source_button_id = source_button_id or button.id
+    display_button_id = display_button.id if display_button else button.id
+    display_menu_id = display_menu.id if display_menu else (menu_for_view.id if menu_for_view else None)
 
     runtime = RuntimeContext(
         chat_id=str(message.chat.id),
@@ -261,6 +268,9 @@ async def _prepare_execution_context(
         "source_button_id": source_button_id,
         "source_menu_id": source_menu_id,
         "view_menu": menu_for_view,
+        "display_button_id": display_button_id,
+        "display_menu_id": display_menu_id,
+        "locate_target_menu": locate_target_menu,
     }
 
     return button, target_menu, message, runtime, action_to_execute, extra_context
@@ -338,6 +348,9 @@ async def _handle_executable_button(
                 runtime,
                 source_button_id=extra_context.get("source_button_id"),
                 source_menu_id=extra_context.get("source_menu_id"),
+                display_button_id=extra_context.get("display_button_id"),
+                display_menu_id=extra_context.get("display_menu_id"),
+                locate_target_menu=extra_context.get("locate_target_menu", False),
             )
         except Exception as e:
             plugin.logger.error(
@@ -370,6 +383,9 @@ async def _process_execution_result(
     *,
     source_button_id: Optional[str] = None,
     source_menu_id: Optional[str] = None,
+    display_button_id: Optional[str] = None,
+    display_menu_id: Optional[str] = None,
+    locate_target_menu: bool = False,
 ) -> None:
     """处理动作和工作流的执行结果。"""
     try:
@@ -439,17 +455,23 @@ async def _process_execution_result(
             plugin.logger.warning("无法获取 Telegram 客户端以更新消息。")
             return
 
-        current_button_id = source_button_id or button_id
-        fallback_menu_id = source_menu_id or (menu.id if menu else None)
-        target_menu_id = result.next_menu_id or fallback_menu_id
+        current_button_id = display_button_id or source_button_id or button_id
+        original_menu_id = source_menu_id or (menu.id if menu else None)
+        effective_display_menu_id = display_menu_id or original_menu_id
+        if result.next_menu_id:
+            target_menu_id = result.next_menu_id
+        elif locate_target_menu and effective_display_menu_id:
+            target_menu_id = effective_display_menu_id
+        else:
+            target_menu_id = original_menu_id
         if not target_menu_id:
             plugin.logger.warning("无法确定用于更新的菜单 ID。")
             return
 
         next_snapshot = await plugin.button_store.get_snapshot()
         menu_for_overrides = None
-        if fallback_menu_id:
-            menu_for_overrides = next_snapshot.menus.get(fallback_menu_id)
+        if target_menu_id:
+            menu_for_overrides = next_snapshot.menus.get(target_menu_id)
         if not menu_for_overrides:
             menu_for_overrides = menu
         overrides_map: Dict[str, Dict[str, Any]] = {}
