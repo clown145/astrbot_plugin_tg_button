@@ -35,10 +35,10 @@
 
 ## 3. 工作原理
 
-当一个工作流被触发时，`ActionExecutor` 会执行以下步骤：
+当一个工作流被触发时，`action_executor.workflow.WorkflowRunner`（由 `ActionExecutor` 门面调度）会执行以下步骤：
 
 1.  **加载定义**：从 `buttons_state.json` 文件中加载工作流的完整定义（所有节点和边）。
-2.  **构建图并排序**：在内存中构建一个有向图，并使用**拓扑排序**算法（Kahn's Algorithm）来确定所有节点的正确执行顺序。这一步也会检测是否存在循环依赖。
+2.  **构建图并排序**：利用 `action_executor.utils.topological_sort_nodes` 对节点执行拓扑排序（Kahn 算法），同时检测循环依赖。
 3.  **顺序执行节点**：
     -   按照排好的顺序，依次执行每个节点所代表的动作。
     -   在执行一个节点前，它会先收集合适的输入参数：
