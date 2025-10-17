@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from ..main import DynamicButtonFrameworkPlugin
+    from ..actions import RuntimeContext
 
 
 ACTION_METADATA = {
@@ -19,6 +20,12 @@ ACTION_METADATA = {
             "type": "button",
             "required": True,
             "description": "选择一个现有按钮，当前按钮会暂时继承它的行为。",
+        },
+        {
+            "name": "focus_target_menu",
+            "type": "boolean",
+            "default": False,
+            "description": "开启后在执行完毕时切换至目标按钮所在的菜单。",
         },
         {
             "name": "reuse_target_text",
@@ -45,11 +52,24 @@ def _build_raw_callback(prefix: str, suffix: str) -> str:
     return f"{prefix}{suffix}" if suffix else prefix
 
 
+def _build_redirect_callback(
+    plugin: "DynamicButtonFrameworkPlugin",
+    origin_button_id: str,
+    target_button_id: str,
+    focus_target_menu: bool,
+) -> str:
+    origin = (origin_button_id or "").strip() or target_button_id
+    focus_flag = "1" if focus_target_menu else "0"
+    return f"{plugin.CALLBACK_PREFIX_REDIRECT}{origin}:{target_button_id}:{focus_flag}"
+
+
 async def execute(
     plugin: "DynamicButtonFrameworkPlugin",
+    runtime: Optional["RuntimeContext"],
     target_button_id: str,
     reuse_target_text: bool = True,
     custom_text: Optional[str] = None,
+    focus_target_menu: bool = False,
 ) -> Dict[str, Any]:
     target_id = (target_button_id or "").strip()
     if not target_id:
@@ -59,6 +79,10 @@ async def execute(
     target_button = snapshot.buttons.get(target_id)
     if not target_button:
         raise ValueError(f"未找到 ID 为 '{target_id}' 的按钮，可能已被删除。")
+
+    runtime_variables = getattr(runtime, "variables", {}) or {}
+    origin_button_id = (runtime_variables.get("button_id") or "").strip()
+    origin_button_id = origin_button_id or target_button.id
 
     payload = target_button.payload or {}
     override: Dict[str, Any] = {"target": "self", "temporary": True}
@@ -112,16 +136,16 @@ async def execute(
             plugin.CALLBACK_PREFIX_BACK, _ensure_str(target_menu)
         )
     elif btn_type == "command":
-        override["raw_callback_data"] = _build_raw_callback(
-            plugin.CALLBACK_PREFIX_COMMAND, target_button.id
+        override["raw_callback_data"] = _build_redirect_callback(
+            plugin, origin_button_id, target_button.id, focus_target_menu
         )
     elif btn_type == "action":
-        override["raw_callback_data"] = _build_raw_callback(
-            plugin.CALLBACK_PREFIX_ACTION, target_button.id
+        override["raw_callback_data"] = _build_redirect_callback(
+            plugin, origin_button_id, target_button.id, focus_target_menu
         )
     elif btn_type == "workflow":
-        override["raw_callback_data"] = _build_raw_callback(
-            plugin.CALLBACK_PREFIX_WORKFLOW, target_button.id
+        override["raw_callback_data"] = _build_redirect_callback(
+            plugin, origin_button_id, target_button.id, focus_target_menu
         )
     else:
         # 兜底：直接复用原按钮的回调数据，如果存在的话；否则仍按照命令处理。
@@ -129,8 +153,8 @@ async def execute(
         if callback_data:
             override["raw_callback_data"] = _ensure_str(callback_data)
         else:
-            override["raw_callback_data"] = _build_raw_callback(
-                plugin.CALLBACK_PREFIX_COMMAND, target_button.id
+            override["raw_callback_data"] = _build_redirect_callback(
+                plugin, origin_button_id, target_button.id, focus_target_menu
             )
 
     return {"button_overrides": [override]}

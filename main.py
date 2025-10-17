@@ -190,6 +190,7 @@ class DynamicButtonFrameworkPlugin(Star):
         self.CALLBACK_PREFIX_BACK = "tgbtn:back:"
         self.CALLBACK_PREFIX_ACTION = "tgbtn:act:"
         self.CALLBACK_PREFIX_WORKFLOW = "tgbtn:wf:"
+        self.CALLBACK_PREFIX_REDIRECT = "tgbtn:redir:"
 
         logger.info(
             f"Dynamic button plugin loaded; menu command '/{self.menu_command}', WebUI={'enabled' if self.webui_enabled else 'disabled'}."

@@ -35,6 +35,8 @@ async def handle_callback_query(
         if data.startswith(plugin.CALLBACK_PREFIX_COMMAND):
             button_id = data[len(plugin.CALLBACK_PREFIX_COMMAND) :]
             await handle_command_button(plugin, query, button_id)
+        elif data.startswith(plugin.CALLBACK_PREFIX_REDIRECT):
+            await handle_redirect_callback(plugin, query, data)
         elif data.startswith(plugin.CALLBACK_PREFIX_MENU):
             menu_id = data[len(plugin.CALLBACK_PREFIX_MENU) :] or "root"
             await handle_menu_navigation(plugin, query, menu_id)
@@ -72,6 +74,84 @@ async def handle_command_button(
     await plugin._dispatch_command(query, command_text)
 
 
+async def handle_redirect_callback(
+    plugin: "DynamicButtonFrameworkPlugin", query: Any, data: str
+) -> None:
+    payload = data[len(plugin.CALLBACK_PREFIX_REDIRECT) :]
+    if not payload:
+        await query.answer("重定向数据缺失。", show_alert=True)
+        return
+
+    origin_id, target_id, focus_flag = (payload.split(":", 2) + ["0"] * 3)[:3]
+    origin_id = origin_id or ""
+    target_id = target_id or ""
+    focus_target_menu = focus_flag == "1"
+
+    if not target_id:
+        await query.answer("重定向目标无效。", show_alert=True)
+        return
+
+    snapshot = await plugin.button_store.get_snapshot()
+    target_button = snapshot.buttons.get(target_id)
+    if not target_button:
+        await query.answer("目标按钮已不存在。", show_alert=True)
+        return
+
+    origin_button_id = origin_id or target_button.id
+    origin_menu = plugin._find_menu_for_button(snapshot, origin_button_id)
+    origin_menu_id = origin_menu.id if origin_menu else None
+
+    btn_type = (target_button.type or "command").lower()
+
+    if btn_type == "command":
+        await handle_command_button(plugin, query, target_button.id)
+        return
+
+    if btn_type == "submenu":
+        menu_id = target_button.payload.get("menu_id")
+        if not menu_id:
+            await query.answer("目标菜单不存在。", show_alert=True)
+            return
+        await handle_menu_navigation(plugin, query, menu_id)
+        return
+
+    if btn_type == "back":
+        menu_id = target_button.payload.get("menu_id") or target_button.payload.get(
+            "target_menu"
+        )
+        if not menu_id:
+            await query.answer("返回目标缺失。", show_alert=True)
+            return
+        await handle_menu_navigation(plugin, query, menu_id)
+        return
+
+    if btn_type == "action":
+        await _handle_executable_button(
+            plugin,
+            query,
+            target_button.id,
+            "action",
+            origin_button_id=origin_button_id,
+            origin_menu_id=origin_menu_id,
+            focus_target_menu=focus_target_menu,
+        )
+        return
+
+    if btn_type == "workflow":
+        await _handle_executable_button(
+            plugin,
+            query,
+            target_button.id,
+            "workflow",
+            origin_button_id=origin_button_id,
+            origin_menu_id=origin_menu_id,
+            focus_target_menu=focus_target_menu,
+        )
+        return
+
+    await query.answer("暂不支持该重定向目标类型。", show_alert=True)
+
+
 async def handle_menu_navigation(
     plugin: "DynamicButtonFrameworkPlugin", query: Any, target_menu_id: str
 ) -> None:
@@ -106,8 +186,15 @@ async def handle_menu_navigation(
 
 
 async def _prepare_execution_context(
-    plugin: "DynamicButtonFrameworkPlugin", query: Any, button_id: str, button_type: str
-) -> Optional[Tuple[Any, Any, Any, Any, Any]]:
+    plugin: "DynamicButtonFrameworkPlugin",
+    query: Any,
+    button_id: str,
+    button_type: str,
+    *,
+    origin_button_id: Optional[str] = None,
+    origin_menu_id: Optional[str] = None,
+    focus_target_menu: bool = False,
+) -> Optional[Tuple[Any, Any, Any, Any, Any, Optional[str], str]]:
     """获取并校验执行动作所需的所有上下文。如果校验失败，返回 None 并应答查询。"""
     from .actions import RuntimeContext
     from .storage import ActionDefinition
@@ -127,6 +214,20 @@ async def _prepare_execution_context(
     if not message:
         await query.answer("缺少消息上下文。", show_alert=True)
         return None
+
+    resolved_origin_button_id = origin_button_id or button.id
+    origin_button = snapshot.buttons.get(resolved_origin_button_id)
+
+    resolved_origin_menu = None
+    if origin_menu_id:
+        resolved_origin_menu = snapshot.menus.get(origin_menu_id)
+    if not resolved_origin_menu and resolved_origin_button_id:
+        resolved_origin_menu = plugin._find_menu_for_button(
+            snapshot, resolved_origin_button_id
+        )
+    resolved_origin_menu_id = (
+        resolved_origin_menu.id if resolved_origin_menu else menu.id
+    )
 
     action_to_execute = None
     if button_type == "action":
@@ -154,6 +255,24 @@ async def _prepare_execution_context(
         await query.answer("无法确定要执行的操作。", show_alert=True)
         return None
 
+    runtime_variables = {
+        "menu_id": menu.id,
+        "menu_name": menu.name,
+        "button_id": button.id,
+        "button_text": button.text,
+        "menu_header_text": getattr(message, "text", None),
+        "origin_button_id": resolved_origin_button_id,
+        "origin_button_text": getattr(origin_button, "text", None),
+        "origin_menu_id": resolved_origin_menu_id,
+        "origin_menu_name": getattr(resolved_origin_menu, "name", None)
+        or menu.name,
+        "redirect_origin_button_id": resolved_origin_button_id,
+        "redirect_origin_menu_id": resolved_origin_menu_id,
+        "redirect_target_button_id": button.id,
+        "redirect_target_menu_id": menu.id,
+        "redirect_focus_target_menu": focus_target_menu,
+    }
+
     runtime = RuntimeContext(
         chat_id=str(message.chat.id),
         chat_type=message.chat.type,
@@ -163,16 +282,18 @@ async def _prepare_execution_context(
         username=query.from_user.username if query.from_user else None,
         full_name=query.from_user.full_name if query.from_user else None,
         callback_data=query.data,
-        variables={
-            "menu_id": menu.id,
-            "menu_name": menu.name,
-            "button_id": button.id,
-            "button_text": button.text,
-            "menu_header_text": getattr(message, "text", None),
-        },
+        variables=runtime_variables,
     )
 
-    return button, menu, message, runtime, action_to_execute
+    return (
+        button,
+        menu,
+        message,
+        runtime,
+        action_to_execute,
+        resolved_origin_menu_id,
+        resolved_origin_button_id,
+    )
 
 
 async def handle_action_button(
@@ -190,19 +311,42 @@ async def handle_workflow_button(
 
 
 async def _handle_executable_button(
-    plugin: "DynamicButtonFrameworkPlugin", query: Any, button_id: str, button_type: str
+    plugin: "DynamicButtonFrameworkPlugin",
+    query: Any,
+    button_id: str,
+    button_type: str,
+    *,
+    origin_button_id: Optional[str] = None,
+    origin_menu_id: Optional[str] = None,
+    focus_target_menu: bool = False,
 ) -> None:
     """
     统一处理可执行按钮（动作和工作流）的核心逻辑。
     通过立即响应查询并将实际工作放入后台任务，避免阻塞 Telegram 的更新循环。
     """
-    context = await _prepare_execution_context(plugin, query, button_id, button_type)
+    context = await _prepare_execution_context(
+        plugin,
+        query,
+        button_id,
+        button_type,
+        origin_button_id=origin_button_id,
+        origin_menu_id=origin_menu_id,
+        focus_target_menu=focus_target_menu,
+    )
     if not context:
         return
 
     async def execute_and_process():
         """在后台执行动作并处理其结果。"""
-        button, menu, message, runtime, action_to_execute = context
+        (
+            button,
+            menu,
+            message,
+            runtime,
+            action_to_execute,
+            resolved_origin_menu_id,
+            resolved_origin_button_id,
+        ) = context
         try:
             result = await plugin.action_executor.execute(
                 plugin,
@@ -214,7 +358,15 @@ async def _handle_executable_button(
             # 注意：此处的 `query` 可能已超时，`query.answer()` 调用会失败。
             # 这是一个已知的副作用，如果需要完美的通知，需要进一步改造 _process_execution_result。
             await _process_execution_result(
-                plugin, query, result, message, menu, button_id, button_type, runtime
+                plugin,
+                query,
+                result,
+                message,
+                menu,
+                resolved_origin_button_id,
+                button_type,
+                runtime,
+                origin_menu_id=resolved_origin_menu_id,
             )
         except Exception as e:
             plugin.logger.error(
@@ -241,9 +393,11 @@ async def _process_execution_result(
     result: Any,
     message: Any,
     menu: Any,
-    button_id: str,
+    current_button_id: str,
     button_type: str,
     runtime: Any,
+    *,
+    origin_menu_id: Optional[str] = None,
 ) -> None:
     """处理动作和工作流的执行结果。"""
     try:
@@ -313,15 +467,30 @@ async def _process_execution_result(
             plugin.logger.warning("无法获取 Telegram 客户端以更新消息。")
             return
 
-        target_menu_id = result.next_menu_id or menu.id
+        origin_menu_fallback = (
+            origin_menu_id
+            or runtime.variables.get("redirect_origin_menu_id")
+            or runtime.variables.get("origin_menu_id")
+            or menu.id
+        )
+        target_menu_id = origin_menu_fallback
+        if result.next_menu_id:
+            target_menu_id = result.next_menu_id
+        else:
+            focus_target_menu = bool(
+                runtime.variables.get("redirect_focus_target_menu")
+            )
+            forced_menu = runtime.variables.get("redirect_target_menu_id")
+            if focus_target_menu and forced_menu:
+                target_menu_id = forced_menu
         next_snapshot = await plugin.button_store.get_snapshot()
         overrides_map: Dict[str, Dict[str, Any]] = {}
         if result.button_overrides:
             overrides_map = plugin._resolve_button_overrides(
-                next_snapshot, menu, result.button_overrides, button_id
+                next_snapshot, menu, result.button_overrides, current_button_id
             )
         if result.button_title:
-            overrides_map.setdefault(button_id, {}).setdefault(
+            overrides_map.setdefault(current_button_id, {}).setdefault(
                 "text", result.button_title
             )
 
