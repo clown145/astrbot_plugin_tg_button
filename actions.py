@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 from urllib.parse import quote_plus
 
 import httpx
-from jinja2 import Environment, StrictUndefined
+from jinja2 import Environment, StrictUndefined, TemplateError
 from jinja2.sandbox import SandboxedEnvironment
 
 try:
@@ -40,6 +40,7 @@ class RuntimeContext:
     variables: Dict[str, Any] = field(default_factory=dict)
 
 
+
 @dataclass
 class ActionExecutionResult:
     success: bool
@@ -55,6 +56,43 @@ class ActionExecutionResult:
     web_app_launch: Optional[Dict[str, Any]] = None
     new_message_chain: Optional[list] = None
     temp_files_to_clean: List[str] = field(default_factory=list)
+
+
+class _PreviewValue:
+    __slots__ = ("_path",)
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+
+    def __getattr__(self, item: str) -> "_PreviewValue":
+        return _PreviewValue(f"{self._path}.{item}")
+
+    def __getitem__(self, item: Any) -> "_PreviewValue":
+        return _PreviewValue(f"{self._path}[{item!r}]")
+
+    def __iter__(self):
+        return iter(())
+
+    def __bool__(self) -> bool:
+        return True
+
+    def __str__(self) -> str:
+        return f"<preview:{self._path}>"
+
+    __repr__ = __str__
+
+
+class _PreviewResponse:
+    __slots__ = ("status_code", "headers", "text", "_json")
+
+    def __init__(self) -> None:
+        self.status_code = 200
+        self.headers: Dict[str, Any] = {}
+        self.text = ""
+        self._json: Any = {"preview": True}
+
+    def json(self) -> Any:
+        return self._json
 
 
 class ActionExecutor:
@@ -1018,13 +1056,33 @@ class ActionExecutor:
                             content_payload = str(rendered).encode(
                                 request_cfg.get("encoding", "utf-8")
                             )
-        except Exception as exc:
+        except TemplateError as exc:
             return ActionExecutionResult(
                 success=False, error=f"渲染请求模板失败: {exc}"
             )
+        except Exception as exc:
+            return ActionExecutionResult(
+                success=False, error=f"构建 HTTP 请求失败: {exc}"
+            )
+
+        payload_candidates = [
+            ("json", json_payload),
+            ("data", data_payload),
+            ("content", content_payload),
+        ]
+        active_payloads = [name for name, value in payload_candidates if value is not None]
+        if len(active_payloads) > 1:
+            conflict_desc = ", ".join(active_payloads)
+            return ActionExecutionResult(
+                success=False,
+                error=f"HTTP 请求体配置冲突: 不能同时使用 {conflict_desc} 载荷",
+            )
 
         response: Optional[httpx.Response] = None
-        if not preview:
+        response_context: Optional[Any] = None
+        if preview:
+            response_context = _PreviewResponse()
+        else:
             try:
                 client = await self._get_http_client()
                 request_kwargs: Dict[str, Any] = {
@@ -1037,22 +1095,34 @@ class ActionExecutor:
                     request_kwargs["json"] = json_payload
                 elif data_payload is not None:
                     request_kwargs["data"] = data_payload
-                if content_payload is not None:
+                elif content_payload is not None:
                     request_kwargs["content"] = content_payload
                 response = await client.request(**request_kwargs)
+                response_context = response
             except Exception as exc:
                 return ActionExecutionResult(
-                    success=False, error=f"HTTP 请求失败: {exc}"
+                    success=False,
+                    error=f"HTTP 请求失败 ({method} {url}): {exc}",
                 )
-        else:
-            response = None
 
-        extracted = None
+        extracted: Any = None
         parse_cfg = config.get("parse", {}) or {}
         extractor_cfg = parse_cfg.get("extractor") or config.get("extractor", {}) or {}
-        extractor_type = extractor_cfg.get("type", "none").lower()
+        extractor_type = str(extractor_cfg.get("type", "none")).lower()
         expr = extractor_cfg.get("expression")
-        if extractor_type != "none" and expr:
+        if preview:
+            if extractor_type in {"jmespath", "jsonpath"} and expr:
+                extracted = _PreviewValue(f"extracted.{extractor_type}")
+            elif extractor_type != "none" and expr:
+                try:
+                    extracted = await self._aapply_extractor(
+                        extractor_type, expr, response_context
+                    )
+                except Exception:
+                    extracted = _PreviewValue(f"extracted.{extractor_type}")
+            else:
+                extracted = _PreviewValue("extracted.preview")
+        elif extractor_type != "none" and expr:
             try:
                 extracted = await self._aapply_extractor(extractor_type, expr, response)
             except Exception as exc:
@@ -1066,7 +1136,7 @@ class ActionExecutor:
             button=button,
             menu=menu,
             runtime=runtime,
-            response=response,
+            response=response_context,
             extracted=extracted,
             variables=combined_variables,
         )
@@ -1091,7 +1161,12 @@ class ActionExecutor:
                         )
                     elif vtype in {"jmespath", "jsonpath"}:
                         expr = var_entry.get("expression", "")
-                        if expr:
+                        if preview:
+                            if expr:
+                                combined_variables[name] = _PreviewValue(
+                                    f"variables.{name}"
+                                )
+                        elif expr:
                             tasks[name] = self._aapply_extractor(vtype, expr, response)
                     elif vtype == "static":
                         combined_variables[name] = var_entry.get("value")
@@ -1129,7 +1204,7 @@ class ActionExecutor:
             button=button,
             menu=menu,
             runtime=runtime,
-            response=response,
+            response=response_context,
             extracted=extracted,
             variables=combined_variables,
         )
@@ -1189,6 +1264,17 @@ class ActionExecutor:
             None,
         )
 
+        if preview:
+            result_variables = self._normalize_preview_values(combined_variables)
+            result_extracted = self._normalize_preview_values(extracted)
+        else:
+            result_variables = combined_variables
+            result_extracted = extracted
+
+        response_status = None
+        if response_context is not None:
+            response_status = getattr(response_context, "status_code", None)
+
         return ActionExecutionResult(
             success=True,
             should_edit_message=should_edit and bool(result_text),
@@ -1196,13 +1282,22 @@ class ActionExecutor:
             parse_mode=parse_mode,
             next_menu_id=next_menu_id,
             data={
-                "extracted": extracted,
-                "response_status": response.status_code if response else None,
-                "variables": combined_variables,
+                "extracted": result_extracted,
+                "response_status": response_status,
+                "variables": result_variables,
             },
             button_title=overrides_self_text,
             button_overrides=overrides,
         )
+
+    def _normalize_preview_values(self, value: Any) -> Any:
+        if isinstance(value, _PreviewValue):
+            return str(value)
+        if isinstance(value, dict):
+            return {key: self._normalize_preview_values(val) for key, val in value.items()}
+        if isinstance(value, list):
+            return [self._normalize_preview_values(item) for item in value]
+        return value
 
     def _map_parse_mode(self, alias: str) -> Optional[str]:
         if alias in {"markdown", "md"}:

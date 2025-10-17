@@ -3,3 +3,5 @@ httpx>=0.24.1
 jinja2>=3.1.2
 jmespath>=1.0.1
 jsonpath-ng>=1.5.3
+pytest>=7.4.0
+pytest-asyncio>=0.21.1
