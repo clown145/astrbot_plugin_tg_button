@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Dict, Any, Optional
 
 if TYPE_CHECKING:
     from ..main import DynamicButtonFrameworkPlugin
-    from ..actions import RuntimeContext
 
 # --- 动作元数据 (新版) ---
 ACTION_METADATA = {

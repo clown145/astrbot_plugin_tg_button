@@ -1,5 +1,8 @@
-import json
+import asyncio
 import functools
+import inspect
+import json
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
@@ -13,7 +16,7 @@ if TYPE_CHECKING:
 from urllib.parse import quote_plus
 
 import httpx
-from jinja2 import Environment, StrictUndefined
+from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
 
 try:
@@ -174,8 +177,6 @@ class ActionExecutor:
             return ActionExecutionResult(success=False, error=error_msg)
 
         try:
-            import inspect
-
             sig = inspect.signature(action.execute)
             if "plugin" in sig.parameters:
                 params_to_pass["plugin"] = plugin
@@ -252,10 +253,10 @@ class ActionExecutor:
                 adj[source_node].append(target_node)
                 in_degree[target_node] += 1
 
-        queue = [node_id for node_id in nodes if in_degree[node_id] == 0]
-        exec_order = []
+        queue = deque(node_id for node_id in nodes if in_degree[node_id] == 0)
+        exec_order: List[str] = []
         while queue:
-            u = queue.pop(0)
+            u = queue.popleft()  # O(1) 操作，比 list.pop(0) 更高效
             exec_order.append(u)
             for v in adj.get(u, []):
                 in_degree[v] -= 1
@@ -402,9 +403,7 @@ class ActionExecutor:
             if condition_error:
                 return None, condition_error
             if not should_execute:
-                self._logger.info(
-                    f"      - 节点 ‘{node_id}’ 的执行条件未满足，跳过。"
-                )
+                self._logger.info(f"      - 节点 ‘{node_id}’ 的执行条件未满足，跳过。")
                 return ActionExecutionResult(success=True, data={"variables": {}}), None
 
             if kind == "modular":
@@ -478,9 +477,7 @@ class ActionExecutor:
                         f"节点 ‘{node_id}’ 配置了空的表达式条件，视为 False。"
                     )
                     return False, None
-                rendered = await self._arender_template(
-                    expression, condition_context
-                )
+                rendered = await self._arender_template(expression, condition_context)
                 return self._coerce_to_bool(rendered), None
 
             if mode == "linked":
@@ -692,15 +689,11 @@ class ActionExecutor:
             )
 
         try:
-            import inspect
-
             if inspect.iscoroutinefunction(registered_action.function):
                 result = await registered_action.function(
                     plugin, runtime=runtime, **params
                 )
             else:
-                import asyncio
-
                 # Create a partial function with all arguments pre-filled
                 func_to_run = functools.partial(
                     registered_action.function, plugin, runtime=runtime, **params
@@ -775,17 +768,17 @@ class ActionExecutor:
         if not template_str:
             return ""
 
-        # Jinja2's render is synchronous and can be CPU-bound.
-        # We run it in an executor to avoid blocking the event loop.
         template = self._template_env.from_string(template_str)
-        func_to_run = functools.partial(template.render, **context)
-        import asyncio
 
+        # 对于短模板直接同步执行，避免线程切换开销
+        # 只有较长模板才使用线程池以防止阻塞事件循环
+        if len(template_str) <= 500:
+            return template.render(**context)
+
+        func_to_run = functools.partial(template.render, **context)
         return await asyncio.to_thread(func_to_run)
 
     async def _arender_structure(self, value: Any, context: Dict[str, Any]) -> Any:
-        import asyncio
-
         if isinstance(value, str):
             return await self._arender_template(value, context)
         if isinstance(value, list):
@@ -803,8 +796,6 @@ class ActionExecutor:
     async def _arender_button_overrides(
         self, overrides_cfg: List[Dict[str, Any]], context: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
-        import asyncio
-
         rendered: List[Dict[str, Any]] = []
         for entry in overrides_cfg or []:
             if not isinstance(entry, dict):
@@ -902,7 +893,16 @@ class ActionExecutor:
 
     async def _get_http_client(self) -> httpx.AsyncClient:
         if not self._http_client:
-            self._http_client = httpx.AsyncClient(http2=False, follow_redirects=True)
+            # 配置连接池限制，防止连接泄漏
+            limits = httpx.Limits(
+                max_connections=50, max_keepalive_connections=20, keepalive_expiry=30.0
+            )
+            self._http_client = httpx.AsyncClient(
+                http2=False,
+                follow_redirects=True,
+                limits=limits,
+                timeout=httpx.Timeout(30.0, connect=10.0),
+            )
         return self._http_client
 
     async def _execute_http(
@@ -956,8 +956,6 @@ class ActionExecutor:
                             header_templates[str(key)] = str(value)
 
             if header_templates:
-                import asyncio
-
                 header_keys = list(header_templates.keys())
                 tasks = [
                     self._arender_template(header_templates[key], base_context)
@@ -1072,7 +1070,6 @@ class ActionExecutor:
         )
         variables_cfg = parse_cfg.get("variables", [])
         if isinstance(variables_cfg, list):
-            import asyncio
             from typing import Coroutine
 
             tasks: Dict[str, Coroutine[Any, Any, Any]] = {}
@@ -1216,9 +1213,6 @@ class ActionExecutor:
     async def _aapply_extractor(
         self, extractor_type: str, expression: str, response: Optional[httpx.Response]
     ) -> Any:
-        import asyncio
-        import functools
-
         if extractor_type == "template":
             render_context = {"response": None}
             if response is not None:

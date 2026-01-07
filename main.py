@@ -12,7 +12,7 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.event import AstrMessageEvent, filter
@@ -40,8 +40,7 @@ except ImportError:  # 可选依赖
     ) = (None,) * 6
 
 # --- 本地模块导入 ---
-from dataclasses import dataclass, field
-from typing import Any, Dict, Callable, List, Optional, Tuple
+from dataclasses import dataclass
 
 # 在类定义之前导入装饰器所需的命令名称
 from .config import MENU_COMMAND, PLUGIN_NAME, build_settings
@@ -49,7 +48,6 @@ from .config import MENU_COMMAND, PLUGIN_NAME, build_settings
 # 导入逻辑处理器
 from . import commands
 from . import handlers
-from . import local_actions
 from .actions import ActionExecutor
 from .storage import (
     ButtonStore,
@@ -454,16 +452,19 @@ class DynamicButtonFrameworkPlugin(Star):
 
         parse_mode_value = (parse_mode or "html").strip().lower()
 
-        def _normalize_button_label(raw_text: Optional[str], fallback: Optional[str] = None) -> str:
+        def _normalize_button_label(
+            raw_text: Optional[str], fallback: Optional[str] = None
+        ) -> str:
             base_text = str(raw_text or "").strip()
             if parse_mode_value == "html" and base_text:
                 base_text = html.unescape(re.sub(r"<[^>]+>", "", base_text))
-            elif parse_mode_value in ("markdown", "md", "markdownv2", "mdv2") and base_text:
+            elif (
+                parse_mode_value in ("markdown", "md", "markdownv2", "mdv2")
+                and base_text
+            ):
                 cleaned = re.sub(r"[*_`~]", "", base_text)
                 if parse_mode_value in ("markdownv2", "mdv2"):
-                    cleaned = cleaned.translate(
-                        str.maketrans("", "", "\\[]()>\"")
-                    )
+                    cleaned = cleaned.translate(str.maketrans("", "", '\\[]()>"'))
                 base_text = cleaned.strip()
             if not base_text:
                 base_text = str(raw_text or "").strip()
@@ -531,9 +532,8 @@ class DynamicButtonFrameworkPlugin(Star):
                         original_button_text = button_def.text
                 if not original_menu_header:
                     original_menu_header = (
-                        (button_menu.header if button_menu else None)
-                        or self.menu_header
-                    )
+                        button_menu.header if button_menu else None
+                    ) or self.menu_header
 
         if button_label_mode and not (button_snapshot and button_menu and button_id):
             button_label_mode = False
@@ -557,7 +557,9 @@ class DynamicButtonFrameworkPlugin(Star):
                     [{"target": "self", "text": label_text}],
                     button_id,
                 )
-            markup, _ = self._build_menu_markup(menu.id, snapshot, overrides=overrides_map)
+            markup, _ = self._build_menu_markup(
+                menu.id, snapshot, overrides=overrides_map
+            )
             if markup is None:
                 return False
             try:
@@ -625,7 +627,9 @@ class DynamicButtonFrameworkPlugin(Star):
                 }
 
         timeout = max(int(timeout or 0), 1)
-        cancel_set = {kw.strip().lower() for kw in (cancel_keywords or []) if kw.strip()}
+        cancel_set = {
+            kw.strip().lower() for kw in (cancel_keywords or []) if kw.strip()
+        }
         platform = self.context.get_platform("telegram")
         if not platform:
             return {
@@ -677,12 +681,13 @@ class DynamicButtonFrameworkPlugin(Star):
         }
         outcome = "timeout"
 
-        def _render_user_template(template: Optional[str], user_text: str) -> Optional[str]:
+        def _render_user_template(
+            template: Optional[str], user_text: str
+        ) -> Optional[str]:
             if not template:
                 return None
-            return (
-                template.replace("{{ user_input }}", user_text)
-                .replace("{{user_input}}", user_text)
+            return template.replace("{{ user_input }}", user_text).replace(
+                "{{user_input}}", user_text
             )
 
         @session_waiter(timeout=timeout, record_history_chains=False)
@@ -780,9 +785,7 @@ class DynamicButtonFrameworkPlugin(Star):
                     latest_menu = None
                 else:
                     latest_menu = (
-                        latest_snapshot.menus.get(menu_id)
-                        if latest_snapshot
-                        else None
+                        latest_snapshot.menus.get(menu_id) if latest_snapshot else None
                     )
                     if latest_snapshot and not latest_menu and button_id:
                         latest_menu = self._find_menu_for_button(
@@ -1172,6 +1175,3 @@ class DynamicButtonFrameworkPlugin(Star):
             except ValueError:
                 return chat, None
         return chat_id_str, None
-
-
-

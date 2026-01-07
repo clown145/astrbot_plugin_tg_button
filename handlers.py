@@ -4,15 +4,12 @@
 
 from __future__ import annotations
 import asyncio
-import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 import aiofiles
 import aiofiles.os
 
-from astrbot.api.event import MessageChain
-import astrbot.api.message_components as Comp
 
 # 用于类型提示，防止循环导入
 if TYPE_CHECKING:
@@ -204,9 +201,7 @@ async def _prepare_execution_context(
         return None
 
     source_button_id = redirect_meta.source_button_id if redirect_meta else None
-    source_button = (
-        snapshot.buttons.get(source_button_id) if source_button_id else None
-    )
+    source_button = snapshot.buttons.get(source_button_id) if source_button_id else None
     if not source_button:
         source_button_id = source_button_id or button.id
         source_button = snapshot.buttons.get(source_button_id)
@@ -219,24 +214,34 @@ async def _prepare_execution_context(
 
     locate_target_menu = redirect_meta.locate_target_menu if redirect_meta else False
 
-    menu_for_runtime = target_menu if locate_target_menu else (source_menu or target_menu)
+    menu_for_runtime = (
+        target_menu if locate_target_menu else (source_menu or target_menu)
+    )
     button_for_runtime = button if locate_target_menu else (source_button or button)
     menu_for_view = (
-        target_menu if locate_target_menu else (source_menu or menu_for_runtime or target_menu)
+        target_menu
+        if locate_target_menu
+        else (source_menu or menu_for_runtime or target_menu)
     )
 
     display_button = button if locate_target_menu else (source_button or button)
     display_menu = target_menu if locate_target_menu else (menu_for_view or target_menu)
 
     source_menu_id = (
-        redirect_meta.source_menu_id if redirect_meta and redirect_meta.source_menu_id else None
+        redirect_meta.source_menu_id
+        if redirect_meta and redirect_meta.source_menu_id
+        else None
     )
     if not source_menu_id and menu_for_view:
         source_menu_id = menu_for_view.id
 
     source_button_id = source_button_id or button.id
     display_button_id = display_button.id if display_button else button.id
-    display_menu_id = display_menu.id if display_menu else (menu_for_view.id if menu_for_view else None)
+    display_menu_id = (
+        display_menu.id
+        if display_menu
+        else (menu_for_view.id if menu_for_view else None)
+    )
 
     runtime = RuntimeContext(
         chat_id=str(message.chat.id),
@@ -317,6 +322,10 @@ async def _handle_executable_button(
     if not context:
         return
 
+    # 注意：不能在这里调用 query.answer()，因为 Telegram 的 callback query 只能 answer 一次。
+    # 如果这里提前 answer 了，后续的 notification 弹窗就无法显示了。
+    # 由 _process_execution_result 统一处理 answer，以支持显示 notification 或错误信息。
+
     async def execute_and_process():
         """在后台执行动作并处理其结果。"""
         (
@@ -335,8 +344,6 @@ async def _handle_executable_button(
                 menu=menu.to_dict(),
                 runtime=runtime,
             )
-            # 注意：此处的 `query` 可能已超时，`query.answer()` 调用会失败。
-            # 这是一个已知的副作用，如果需要完美的通知，需要进一步改造 _process_execution_result。
             await _process_execution_result(
                 plugin,
                 query,
@@ -362,12 +369,12 @@ async def _handle_executable_button(
                 if client and runtime:
                     await client.send_message(
                         chat_id=runtime.chat_id,
-                        text=f"执行“{button.name}”时发生后台错误。",
+                        text=f"执行 {button.text} 时发生后台错误。",
                     )
             except Exception as inner_exc:
                 plugin.logger.error(f"无法发送后台错误通知: {inner_exc}")
 
-    # 将耗时的操作调度为后台任务，后台任务将负责响应回调
+    # 将耗时的操作调度为后台任务
     asyncio.create_task(execute_and_process())
 
 

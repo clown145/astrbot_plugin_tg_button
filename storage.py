@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import shutil
 import uuid
 from datetime import datetime
 from dataclasses import dataclass, field, asdict

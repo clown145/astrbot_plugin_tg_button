@@ -11,7 +11,7 @@ import aiofiles
 from astrbot.api.star import StarTools
 
 if TYPE_CHECKING:
-    from ..main import DynamicButtonFrameworkPlugin
+    pass
 
 
 # --- 动作元数据 ---

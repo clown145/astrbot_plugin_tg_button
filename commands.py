@@ -5,7 +5,7 @@ tg_button 插件的命令处理逻辑。
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
-from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event import AstrMessageEvent
 
 # 类型提示的循环导入保护
 if TYPE_CHECKING:

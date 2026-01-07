@@ -91,11 +91,12 @@ async def execute(
     if not client:
         raise RuntimeError("无法获取 Telegram 客户端实例。")
     if not any([text, image_source, voice_source]):
-        plugin.logger.warning("edit_message_media: 未提供任何有效输入（文本、图片或语音），操作已跳过。")
+        plugin.logger.warning(
+            "edit_message_media: 未提供任何有效输入（文本、图片或语音），操作已跳过。"
+        )
         return {}
     if not InputMediaPhoto:
-         raise RuntimeError("Telegram 库未完整安装，缺少 InputMediaPhoto 等类型。")
-
+        raise RuntimeError("Telegram 库未完整安装，缺少 InputMediaPhoto 等类型。")
 
     # 2. 根据输入决定执行何种操作
     def _map_parse_mode(value: Optional[str]) -> Optional[str]:
@@ -137,9 +138,7 @@ async def execute(
                     media_payload = InputMediaAudio(**media_kwargs)
 
             await client.edit_message_media(
-                chat_id=chat_id,
-                message_id=message_id,
-                media=media_payload
+                chat_id=chat_id, message_id=message_id, media=media_payload
             )
 
         # --- 情况 B: 只更新说明文字 ---
