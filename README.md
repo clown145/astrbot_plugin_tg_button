@@ -12,6 +12,7 @@ _✨ 为 AstrBot 在 Telegram 中添加交互式按钮的插件，现已更新 W
 [![GitHub](https://img.shields.io/badge/作者-clown145-blue)](https://github.com/clown145)
 
 </div>
+![Stone Badge](https://stone.professorlee.work/api/stone/clown145/astrbot_plugin_tg_button)
 
 ## 📜 更新日志
 
